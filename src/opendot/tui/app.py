@@ -454,19 +454,14 @@ class OpendotTUI(App):
     async def _pick_model(self) -> None:
         import asyncio
         from opendot import catalog
-        from opendot.providers import list_models, provider_of
 
-        # Prefer the models.dev catalog (curated names, grouped, text+tool only);
-        # fall back to LiteLLM's bundled registry offline / if it's empty.
+        # Text chat models from LiteLLM's registry, grouped by provider.
         entries = await asyncio.to_thread(catalog.list_models)
-        if entries:
-            items = [(e["model"], f"{e['name']}   {e['model']}", e["provider"]) for e in entries]
-        else:
-            models = list_models()
-            if not models:
-                self._write("model list unavailable; use  /model <id>  to set one directly.", "sys")
-                return
-            items = sorted(((m, m, provider_of(m)) for m in models), key=lambda t: (t[2], t[1]))
+        if not entries:
+            self._write("model list unavailable; use  /model <id>  to set one directly.", "sys")
+            return
+        # name == model in the catalog, so show the model string once.
+        items = [(e["model"], e["model"], e["provider"]) for e in entries]
         chosen = await self.push_screen_wait(SearchListModal("Select model", items))
         if chosen:
             self._set_model(chosen)
@@ -475,7 +470,7 @@ class OpendotTUI(App):
         import asyncio
         from opendot.providers import connectable_providers, register_key
 
-        # models.dev list when reachable, hardcoded fallback otherwise.
+        # LiteLLM-routable providers that have text models (from the catalog).
         pairs = await asyncio.to_thread(connectable_providers)
         items = [(var, name, "Providers") for name, var in pairs]
         var = await self.push_screen_wait(SearchListModal("Connect a provider", items))

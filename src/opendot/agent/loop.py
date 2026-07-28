@@ -213,9 +213,9 @@ class Agent:
         )
         content_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
-        usage_counted = False  # guard: with include_usage some providers report
-                               # usage on both the last content chunk AND a final
-                               # usage-only chunk — count it once per turn.
+        # Guard: with include_usage some providers report usage on both the last
+        # content chunk and a final usage-only chunk — count it once per turn.
+        usage_counted = False
 
         async for chunk in stream:
             # Usage may arrive on its own final chunk (no choices) or attached to

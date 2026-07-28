@@ -93,6 +93,8 @@ class SearchListModal(ModalScreen[str | None]):
         ol.clear_options()
         last_group = None
         self._values: list[str] = []
+        row_index = 0          # index into the OptionList (headers included)
+        first_selectable = None  # index of the first non-disabled (data) row
         for item in self._items:
             value, label, group = item[0], item[1], item[2]
             status = item[3] if len(item) > 3 else ""  # optional right-aligned status
@@ -101,12 +103,16 @@ class SearchListModal(ModalScreen[str | None]):
             if group and group != last_group:
                 ol.add_option(Option(Text(group.upper(), style="bold magenta"), disabled=True))
                 last_group = group
+                row_index += 1
             # Status (e.g. "✓ enabled") is rendered flush-right via a grid.
             prompt = _row_bar(label, status, "green") if status else Text(label)
             ol.add_option(Option(prompt, id=str(len(self._values))))
+            if first_selectable is None:
+                first_selectable = row_index  # this data row's OptionList index
+            row_index += 1
             self._values.append(value)
-        if self._values:
-            ol.highlighted = 1 if (self._items and self._items[0][2]) else 0
+        if first_selectable is not None:
+            ol.highlighted = first_selectable
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._populate(event.value)
