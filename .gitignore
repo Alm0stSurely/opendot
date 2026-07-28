@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Packaging / build
+*.whl
+pip-wheel-metadata/
+
+# Test / coverage / type caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Editor / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# opendot local state (snapshot store lives in ~/.opendot; never commit any local copy)
+.opendot/
+
+# Environment / secrets
+.env

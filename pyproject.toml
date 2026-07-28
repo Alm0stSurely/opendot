@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "opendot"
+version = "0.0.1"
+description = "An interactive terminal AI agent you can fully undo — any model, acts on your real files, every action reversible."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "Vedaant Singh" }]
+keywords = ["ai", "agent", "cli", "llm", "litellm", "coding-agent", "terminal"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development",
+    "Topic :: Utilities",
+]
+dependencies = [
+    "litellm>=1.50",     # any model: cloud, local, HF, through one interface
+    "rich>=13.0",        # pretty terminal output (plain REPL fallback)
+    "textual>=0.60",     # full-screen TUI (main pane + live ledger sidebar)
+    "prompt_toolkit>=3.0",  # plain REPL input (history, editing)
+    "mcp>=1.2",          # MCP client: connect to external MCP servers' tools
+]
+
+[project.optional-dependencies]
+office = ["openpyxl>=3.1", "python-pptx>=0.6"]  # xlsx / pptx read+edit tools
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "openpyxl>=3.1", "python-pptx>=0.6"]
+
+[project.scripts]
+opendot = "opendot.cli:main"
+
+[project.urls]
+Repository = "https://github.com/vedaant00/opendot"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/opendot"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"   # pytest-asyncio runs `async def test_*` without per-test markers
