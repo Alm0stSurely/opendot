@@ -213,12 +213,16 @@ class Agent:
         )
         content_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
+        usage_counted = False  # guard: with include_usage some providers report
+                               # usage on both the last content chunk AND a final
+                               # usage-only chunk — count it once per turn.
 
         async for chunk in stream:
-            # The final usage chunk (include_usage) has no choices.
-            if getattr(chunk, "usage", None) and not chunk.choices:
-                self.usage.add_response(chunk, litellm)
-                continue
+            # Usage may arrive on its own final chunk (no choices) or attached to
+            # a content chunk — capture it either way, but only once.
+            if not usage_counted and getattr(chunk, "usage", None):
+                self.usage.add_response(chunk, litellm, model=self.config.model)
+                usage_counted = True
             if not chunk.choices:
                 continue
             delta = chunk.choices[0].delta
@@ -250,7 +254,7 @@ class Agent:
             model=self.config.model, messages=self.messages, tools=tools,
             temperature=self.config.temperature, stream=False,
         )
-        self.usage.add_response(resp, litellm)
+        self.usage.add_response(resp, litellm, model=self.config.model)
         msg = resp.choices[0].message
         raw = getattr(msg, "tool_calls", None) or []
         calls = [
