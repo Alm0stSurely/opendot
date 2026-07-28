@@ -110,3 +110,24 @@ def test_mcp_add_cli_parses_flags_vs_command(tmp_path, monkeypatch):
     cli.main()
     cfg = load_mcp_config()
     assert cfg["s"] == {"command": "cmd", "args": ["-y", "pkg"], "env": {"K": "v"}}
+
+
+def test_mcp_add_remote_with_header(tmp_path, monkeypatch):
+    """`opendot mcp add NAME --url <u> --header 'Authorization=Bearer x'` stores
+    the header so authenticated remote servers (e.g. Supabase PAT) can connect."""
+    import sys
+    from opendot import cli
+    from opendot.mcp.manager import load_mcp_config
+
+    monkeypatch.setenv("OPENDOT_HOME", str(tmp_path / "store"))
+    monkeypatch.setattr(sys, "argv", [
+        "opendot", "mcp", "add", "supabase",
+        "--url", "https://mcp.supabase.com/mcp?project_ref=abc",
+        "--header", "Authorization=Bearer tok123",
+    ])
+    cli.main()
+    cfg = load_mcp_config()
+    assert cfg["supabase"] == {
+        "url": "https://mcp.supabase.com/mcp?project_ref=abc",
+        "headers": {"Authorization": "Bearer tok123"},
+    }

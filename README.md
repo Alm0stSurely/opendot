@@ -52,21 +52,22 @@ pip install opendot
 ```bash
 opendot                              # open an interactive chat
 opendot -p "summarize this project"  # one-shot, for scripts / CI
-opendot --model claude-sonnet-4-5    # any model (see below)
+opendot --model claude-opus-4-5      # launch with a specific model (see below)
 
 opendot log                          # audit: what has the agent done here?
 opendot undo                         # revert the last action
 opendot undo 000004                  # restore the workspace to before action #4
 ```
 
-Inside the chat, slash-commands: `/log`, `/undo`, `/clear`, `/compact`,
-`/model`, `/help`.
+Inside the chat, slash-commands: `/model` (searchable model picker),
+`/provider` (connect a provider + paste an API key), `/log`, `/undo`, `/clear`,
+`/compact`, `/help`.
 
 ## Any model
 
-opendot uses [LiteLLM](https://docs.litellm.ai), so any model works — cloud,
-local, or Hugging Face. Set the provider's API key in your environment and pass
-`--model`:
+Any model works — cloud, local, or Hugging Face. You can pick a model and paste
+an API key right inside the chat with `/model` and `/provider`, or set the key
+in your environment and pass `--model`:
 
 | Provider | Env var | Example `--model` |
 |----------|---------|-------------------|
@@ -82,6 +83,8 @@ Reasoning models stream their thinking live.
 
 opendot is an [MCP](https://modelcontextprotocol.io) client: connect any MCP
 server and its tools become available to the agent alongside the built-in ones.
+Manage them from inside the chat with **`/mcp`** (a dropdown of your servers and
+their status, with "➕ Add a server"), or from the command line:
 
 ```bash
 # a stdio server — put its launch command after `--`
@@ -90,16 +93,43 @@ opendot mcp add <name> --env KEY=VALUE -- <command> [args...]
 # a remote server (http/sse)
 opendot mcp add <name> --url <https url>
 
+# a remote server that needs auth — pass an HTTP header
+opendot mcp add supabase \
+  --url "https://mcp.supabase.com/mcp?project_ref=<id>&read_only=true" \
+  --header "Authorization=Bearer <your-supabase-access-token>"
+
 opendot mcp list           # show configured servers
 opendot mcp remove <name>  # remove one
 ```
 
 Servers are stored in `~/.opendot/mcp.json` and connect automatically on the
-next launch; connected servers appear in the sidebar.
+next launch; connected servers appear in the sidebar. For authenticated remote
+servers, opendot supports the header/token method (e.g. Supabase's access
+token) — the interactive browser-OAuth flow is not implemented yet.
 
 Because opendot can't know what an external tool does, **every MCP tool call is
 treated as irreversible** — it's confirmed before running and marked ✗ in the
 ledger. Your built-in file/shell actions stay snapshotted and undoable as usual.
+
+## Connect apps with Composio
+
+Beyond MCP, opendot can connect to [Composio](https://composio.dev)'s 3000+ app
+tools (Gmail, Slack, GitHub, Notion, Linear, …) using **your own** Composio API
+key. Install the extra and use `/composio` in the chat:
+
+```bash
+pip install 'opendot[composio]'
+```
+
+- The first `/composio` asks for your Composio API key (stored in
+  `~/.opendot/composio.json`, owner-readable only).
+- After that, `/composio` lists the available apps. Pick one — if it needs
+  OAuth, opendot opens your browser to authorize and waits for you to finish;
+  direct/API-key connectors activate immediately.
+- Enabled apps appear in the sidebar; their tools load on the next launch.
+
+Composio tools reach external services, so — like MCP — **every call is treated
+as irreversible**: confirmed first, marked ✗ in the ledger.
 
 ## Project rules — `OPENDOT.md`
 

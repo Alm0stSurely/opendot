@@ -307,9 +307,23 @@ class Toolbox:
                     "parameters": mt.input_schema,
                 },
             })
+        # External Composio tools (never in read-only explorer boxes).
+        if not self.read_only:
+            from opendot import composio_tools
+            specs.extend(composio_tools.build_tool_specs())
         return specs
 
     def call(self, name: str, args: dict[str, Any]) -> str:
+        # Composio tools are external + opaque like MCP: confirm + mark irreversible.
+        from opendot import composio_tools
+        if composio_tools.is_composio_tool(name):
+            reason = "external Composio tool — opendot cannot undo it"
+            if not self._confirm(f"Run {name}?  {reason}"):
+                return "skipped: user declined an external Composio tool call"
+            if self.rev is not None:
+                self.rev.before_action("shell", name, reversible=False, note=reason)
+            return composio_tools.execute_tool(name, args)
+
         # MCP tools are external + opaque: opendot can't undo them, so gate every
         # call through confirm and record it as irreversible in the ledger.
         mt = self._mcp_tools.get(name)

@@ -34,7 +34,8 @@ SLASH_HELP = """\
   /undo     revert the last action ( /undo <id> to restore to a point )
   /clear    reset the conversation
   /compact  trim old conversation turns to free up context
-  /model    show the current model
+  /model    show the current model ( /model <id> to switch )
+  /provider connect a provider ( /provider <ENV_VAR> <api-key> )
   exit      quit (also: /exit, /quit, Ctrl-D)
 """
 
@@ -58,6 +59,25 @@ def _confirm(prompt: str) -> bool:
     except (EOFError, KeyboardInterrupt):
         return False
     return ans in {"y", "yes"}
+
+
+def _warn_if_missing_key(model: str) -> None:
+    """Print a friendly hint if the model's expected API key isn't in the env.
+
+    A warning only — we still let the call proceed, because LiteLLM may find the
+    key another way and we'd rather not falsely block a working setup.
+    """
+    from opendot.providers import env_var_for
+
+    env_var = env_var_for(model)
+    if env_var and not os.environ.get(env_var):
+        console.print(
+            f"[yellow]![/yellow] No [bold]{env_var}[/bold] found in your environment "
+            f"for model [cyan]{model}[/cyan].\n"
+            f"  Set it (e.g. [dim]export {env_var}=...[/dim]), or pick another model "
+            f"with [dim]--model[/dim] / [dim]$OPENDOT_MODEL[/dim].\n"
+            f"  See the model table: https://github.com/vedaant00/opendot#any-model\n"
+        )
 
 
 def _build_agent(model: str, workdir: str, confirm=None) -> Agent:
@@ -158,6 +178,13 @@ def _cmd_mcp(args) -> None:
                 env[k] = v
         if args.url:
             spec = {"url": args.url}
+            headers = {}
+            for pair in getattr(args, "header", []):
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    headers[k.strip()] = v.strip()
+            if headers:
+                spec["headers"] = headers  # e.g. Authorization=Bearer <token>
         else:
             cmd = list(getattr(args, "post_dashdash", []))
             if not cmd:
@@ -260,8 +287,26 @@ def _interactive(agent: Agent) -> None:
             dropped = agent.compact()
             console.print(f"[dim]compacted: dropped {dropped} old message(s)[/dim]")
             continue
-        if low == "/model":
-            console.print(f"model: [cyan]{agent.config.model}[/cyan]")
+        if low.startswith("/model"):
+            parts = text.split(maxsplit=1)
+            if len(parts) > 1:
+                agent.config.model = parts[1].strip()
+                console.print(f"model → [cyan]{agent.config.model}[/cyan]")
+                _warn_if_missing_key(agent.config.model)
+            else:
+                console.print(f"model: [cyan]{agent.config.model}[/cyan]  "
+                              "([dim]/model <id> to change[/dim])")
+            continue
+        if low.startswith("/provider") or low.startswith("/connect"):
+            from opendot.providers import register_key
+            parts = text.split()
+            if len(parts) == 3:
+                register_key(parts[1], parts[2])
+                console.print(f"[green]✓[/green] set {parts[1]} for this session — "
+                              f"persist with [dim]export {parts[1]}=…[/dim]")
+            else:
+                console.print("usage: [dim]/provider <ENV_VAR> <api-key>[/dim]  "
+                              "(the TUI has an interactive picker)")
             continue
         if low == "/log":
             _cmd_log(agent.config.workdir)
@@ -294,8 +339,8 @@ def main() -> None:
         description="An interactive terminal AI agent you can fully undo.",
     )
     parser.add_argument("-p", "--prompt", help="Run a single task and exit (one-shot mode).")
-    parser.add_argument("--model", default=os.environ.get("OPENDOT_MODEL", "gpt-4o"),
-                        help="Model id (any LiteLLM model, e.g. gpt-4o, claude-sonnet-4-5, ollama/qwen2.5).")
+    parser.add_argument("--model", default=os.environ.get("OPENDOT_MODEL", "gpt-5.1"),
+                        help="Model id (any LiteLLM model, e.g. gpt-5.1, claude-opus-4-5, ollama/qwen3).")
     parser.add_argument("-C", "--dir", default=os.getcwd(), help="Working directory (default: cwd).")
     parser.add_argument("--repl", action="store_true", help="Use the plain REPL instead of the full-screen TUI.")
     parser.add_argument("--version", action="version", version=f"opendot {__version__}")
@@ -317,6 +362,9 @@ def main() -> None:
     p_add.add_argument("--url", help="A remote MCP server URL (http/sse) instead of a command.")
     p_add.add_argument("--env", action="append", default=[], metavar="KEY=VAL",
                        help="Environment variable for the server (repeatable).")
+    p_add.add_argument("--header", action="append", default=[], metavar="KEY=VAL",
+                       help="HTTP header for a remote (--url) server, e.g. "
+                            "'Authorization=Bearer <token>' (repeatable).")
     # The launch command (after `--`) is captured from argv in main(), not here,
     # so its own flags (e.g. -y) aren't parsed by argparse.
     mcp_sub.add_parser("list", help="List configured MCP servers.")
@@ -337,6 +385,9 @@ def main() -> None:
     if args.command == "mcp":
         _cmd_mcp(args)
         return
+
+    # Everything below this point calls a model — hint if the key looks missing.
+    _warn_if_missing_key(args.model)
 
     # One-shot: -p flag, or piped stdin.
     oneshot = args.prompt
