@@ -43,6 +43,22 @@ CONNECTABLE_PROVIDERS: list[tuple[str, str]] = [
 ]
 
 
+# A sensible default model per provider env var, used to auto-pick a working
+# model when the configured default's key is missing but this one's key is set.
+# Ordered by preference when several keys are present.
+# One entry per CONNECTABLE_PROVIDERS env var, so a key for ANY offered
+# provider auto-selects a working model (keep these two lists in sync).
+_ENV_DEFAULT_MODEL: list[tuple[str, str]] = [
+    ("OPENAI_API_KEY", "gpt-5.1"),
+    ("ANTHROPIC_API_KEY", "claude-opus-4-5"),
+    ("GEMINI_API_KEY", "gemini/gemini-3-pro"),
+    ("DEEPSEEK_API_KEY", "deepseek/deepseek-chat"),
+    ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile"),
+    ("MISTRAL_API_KEY", "mistral/mistral-large-latest"),
+    ("HF_TOKEN", "huggingface/meta-llama/Llama-3.3-70B-Instruct"),
+]
+
+
 def env_var_for(model: str) -> str | None:
     """The API-key env var LiteLLM expects for ``model``, or None if unknown /
     keyless (local models)."""
@@ -52,6 +68,17 @@ def env_var_for(model: str) -> str | None:
     for prefix, var in PROVIDER_KEYS.items():
         if low.startswith(prefix):
             return var
+    return None
+
+
+def model_for_available_key() -> str | None:
+    """If some provider's API key is set in the environment, return a sensible
+    default model for it (first match by preference order). None if no known key
+    is set. Used to auto-switch when the configured model's key is missing."""
+    import os
+    for var, model in _ENV_DEFAULT_MODEL:
+        if os.environ.get(var):
+            return model
     return None
 
 

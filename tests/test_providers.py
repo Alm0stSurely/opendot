@@ -9,6 +9,46 @@ import os
 from opendot import providers as p
 
 
+def _clear_keys(monkeypatch):
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+                "DEEPSEEK_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
+
+
+def test_model_for_available_key_picks_the_set_provider(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
+    assert p.model_for_available_key() == "deepseek/deepseek-chat"
+
+
+def test_model_for_available_key_none_when_no_keys(monkeypatch):
+    _clear_keys(monkeypatch)
+    assert p.model_for_available_key() is None
+
+
+def test_model_for_available_key_prefers_openai(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-d")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-o")
+    assert p.model_for_available_key() == "gpt-5.1"
+
+
+def test_model_for_available_key_handles_huggingface(monkeypatch):
+    _clear_keys(monkeypatch)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("HF_TOKEN", "hf_x")
+    model = p.model_for_available_key()
+    assert model is not None and model.startswith("huggingface/")
+
+
+def test_every_connectable_provider_has_an_auto_default():
+    """Every provider you can connect via /provider must map to a default model,
+    else setting only that key would leave opendot stuck on gpt-5.1."""
+    auto_vars = {var for var, _ in p._ENV_DEFAULT_MODEL}
+    for _name, var in p.CONNECTABLE_PROVIDERS:
+        assert var in auto_vars, f"{var} has no auto-switch default model"
+
+
 def test_env_var_for_known_providers():
     assert p.env_var_for("gpt-5.1") == "OPENAI_API_KEY"
     assert p.env_var_for("claude-opus-4-5") == "ANTHROPIC_API_KEY"
