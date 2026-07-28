@@ -14,7 +14,9 @@ Config lives at ``~/.opendot/mcp.json`` (Claude-Desktop-style):
         "pyscrappy": { "command": "pyscrappy-mcp" },
         "github":    { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"],
                        "env": {"GITHUB_TOKEN": "..."} },
-        "remote":    { "url": "https://example.com/mcp" }          // http/sse
+        "remote":    { "url": "https://example.com/mcp" },         // http/sse
+        "supabase":  { "url": "https://mcp.supabase.com/mcp?project_ref=abc",
+                       "headers": {"Authorization": "Bearer <PAT>"} }  // authenticated remote
       }
     }
 
@@ -147,11 +149,12 @@ class MCPManager:
         """Return (read, write) streams for a stdio or http/sse server."""
         if spec.get("url"):
             url = spec["url"]
+            headers = spec.get("headers") or None  # e.g. {"Authorization": "Bearer ..."}
             if url.rstrip("/").endswith("/sse"):
                 from mcp.client.sse import sse_client
-                return (await self._stack.enter_async_context(sse_client(url)))[:2]
+                return (await self._stack.enter_async_context(sse_client(url, headers=headers)))[:2]
             from mcp.client.streamable_http import streamablehttp_client
-            return (await self._stack.enter_async_context(streamablehttp_client(url)))[:2]
+            return (await self._stack.enter_async_context(streamablehttp_client(url, headers=headers)))[:2]
         # stdio
         from mcp import StdioServerParameters
         from mcp.client.stdio import stdio_client

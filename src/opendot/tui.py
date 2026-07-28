@@ -61,11 +61,218 @@ class ConfirmModal(ModalScreen[bool]):
         if event.key == "escape":
             self.dismiss(False)
 
-# Per-tool glyphs so each step reads at a glance (opencode/Plandot-style).
-_TOOL_ICONS = {
-    "read_file": "📖", "write_file": "✎", "edit": "✂", "list_files": "▤",
-    "grep": "🔍", "glob": "❊", "run_shell": "❯",
-}
+
+class SearchListModal(ModalScreen[str | None]):
+    """A searchable, keyboard-navigable list picker (opencode-style).
+
+    ``items`` is a list of (value, label, group) tuples. Typing filters by
+    label; ↑/↓ move; Enter selects (returns the value); Esc cancels (None).
+    """
+
+    CSS = """
+    SearchListModal { align: center middle; }
+    #box { width: 70%; max-width: 90; height: 80%; padding: 1 2;
+           border: thick $accent; background: $surface; }
+    #title { text-style: bold; margin-bottom: 1; }
+    #search { margin-bottom: 1; }
+    #list { height: 1fr; }
+    """
+
+    def __init__(self, title: str, items: list[tuple[str, str, str]]) -> None:
+        super().__init__()
+        self._title = title
+        self._items = items  # (value, label, group)
+
+    def compose(self) -> ComposeResult:
+        from textual.widgets import OptionList
+
+        with Vertical(id="box"):
+            yield Static(id="title")
+            yield Input(placeholder="Search…", id="search")
+            yield OptionList(id="list")
+
+    def on_mount(self) -> None:
+        self._set_title()
+        self._populate("")
+        self.query_one("#search", Input).focus()
+
+    def _set_title(self) -> None:
+        # "esc cancel" flush right: pad the gap to the title widget's width.
+        title = self.query_one("#title", Static)
+        hint = "esc cancel"
+        width = title.content_size.width or 60
+        gap = max(4, width - len(self._title) - len(hint))
+        title.update(Text.assemble((self._title, "bold"), (" " * gap, ""), (hint, "dim")))
+
+    def _populate(self, query: str) -> None:
+        from textual.widgets import OptionList
+        from textual.widgets.option_list import Option
+
+        q = query.lower()
+        ol = self.query_one("#list", OptionList)
+        ol.clear_options()
+        last_group = None
+        self._values: list[str] = []
+        for value, label, group in self._items:
+            if q and q not in label.lower():
+                continue
+            if group and group != last_group:
+                ol.add_option(Option(Text(group.upper(), style="bold magenta"), disabled=True))
+                last_group = group
+            ol.add_option(Option(label, id=str(len(self._values))))
+            self._values.append(value)
+        if self._values:
+            ol.highlighted = 1 if (self._items and self._items[0][2]) else 0
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        self._populate(event.value)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Enter in the search box selects the current highlight.
+        from textual.widgets import OptionList
+
+        event.stop()  # don't let Enter bubble to the main chat input
+        ol = self.query_one("#list", OptionList)
+        if ol.highlighted is not None:
+            opt = ol.get_option_at_index(ol.highlighted)
+            if opt.id is not None:
+                self.dismiss(self._values[int(opt.id)])
+
+    def on_option_list_option_selected(self, event) -> None:
+        if event.option.id is not None:
+            self.dismiss(self._values[int(event.option.id)])
+
+    def on_key(self, event) -> None:
+        from textual.widgets import OptionList
+
+        if event.key == "escape":
+            self.dismiss(None)
+        elif event.key in ("down", "up"):
+            # Let the arrow keys drive the list while focus stays in the search box.
+            ol = self.query_one("#list", OptionList)
+            if event.key == "down":
+                ol.action_cursor_down()
+            else:
+                ol.action_cursor_up()
+            event.stop()
+
+
+class ApiKeyModal(ModalScreen[str | None]):
+    """A single password field to paste an API key. Returns the key, or None."""
+
+    CSS = """
+    ApiKeyModal { align: center middle; }
+    #box { width: 60%; max-width: 80; height: auto; padding: 1 2;
+           border: thick $accent; background: $surface; }
+    #title { text-style: bold; margin-bottom: 1; }
+    """
+
+    def __init__(self, provider: str, env_var: str) -> None:
+        super().__init__()
+        self._provider = provider
+        self._env_var = env_var
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="box"):
+            yield Static(id="title")
+            yield Input(placeholder="Paste API key…", password=True, id="key")
+
+    def on_mount(self) -> None:
+        title = self.query_one("#title", Static)
+        head, hint = f"Connect {self._provider}", "esc cancel"
+        width = title.content_size.width or 60
+        gap = max(4, width - len(head) - len(hint))
+        title.update(Text.assemble(
+            (head, "bold"), (" " * gap, ""), (hint + "\n", "dim"),
+            (f"sets {self._env_var} for this session", "dim italic"),
+        ))
+        self.query_one("#key", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()  # don't let Enter bubble to the main chat input
+        self.dismiss(event.value.strip() or None)
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+class McpAddModal(ModalScreen[dict | None]):
+    """Form to add an MCP server. Returns {"name", "spec"} or None.
+
+    One field decides the transport: a value starting with http(s):// is a
+    remote server (with an optional Authorization header); anything else is a
+    stdio launch command (split on spaces).
+    """
+
+    CSS = """
+    McpAddModal { align: center middle; }
+    #box { width: 70%; max-width: 90; height: auto; padding: 1 2;
+           border: thick $accent; background: $surface; }
+    #title { text-style: bold; margin-bottom: 1; }
+    Input { margin-bottom: 1; }
+    #hint { color: $text-muted; text-style: italic; }
+    """
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="box"):
+            yield Static(id="title")
+            yield Input(placeholder="name (e.g. github, supabase)", id="name")
+            yield Input(placeholder="https://…/mcp   OR   npx -y @scope/server args…", id="target")
+            yield Input(placeholder="Authorization header (remote only, optional)", id="header")
+            yield Static(
+                "enter submit · a value starting with http(s):// is treated as a remote URL",
+                id="hint",
+            )
+
+    def on_mount(self) -> None:
+        title = self.query_one("#title", Static)
+        head, hint = "Add an MCP server", "esc cancel"
+        width = title.content_size.width or 60
+        gap = max(4, width - len(head) - len(hint))
+        title.update(Text.assemble((head, "bold"), (" " * gap, ""), (hint, "dim")))
+        self.query_one("#name", Input).focus()
+
+    def _submit(self) -> None:
+        name = self.query_one("#name", Input).value.strip()
+        target = self.query_one("#target", Input).value.strip()
+        header = self.query_one("#header", Input).value.strip()
+        if not name or not target:
+            return  # name + target required; keep the form open
+        if target.lower().startswith(("http://", "https://")):
+            spec: dict = {"url": target}
+            if header:
+                k, _, v = header.partition("=") if "=" in header else header.partition(":")
+                spec["headers"] = {k.strip(): v.strip()}
+        else:
+            parts = target.split()
+            spec = {"command": parts[0]}
+            if len(parts) > 1:
+                spec["args"] = parts[1:]
+        self.dismiss({"name": name, "spec": spec})
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        event.stop()  # don't let Enter bubble to the main chat input
+        self._submit()
+
+    def on_key(self, event) -> None:
+        if event.key == "escape":
+            self.dismiss(None)
+
+
+# Slash commands shown in the autocomplete popup (name, one-line description).
+# Single source of truth — the popup filters this list.
+SLASH_COMMANDS: list[tuple[str, str]] = [
+    ("/model", "switch model (searchable picker)"),
+    ("/provider", "connect a provider + API key"),
+    ("/mcp", "manage MCP servers"),
+    ("/composio", "connect apps (Gmail, Slack, …)"),
+    ("/log", "show the action ledger"),
+    ("/undo", "revert the last action ( /undo <id> )"),
+    ("/clear", "reset the conversation"),
+    ("/compact", "trim old turns to free context"),
+    ("/help", "list commands"),
+]
 
 
 def _render_tool_result(tool: str, result: str):
@@ -158,6 +365,39 @@ class Sidebar(Static):
                 t.append(f"{name} failed\n", style="red")
             t.append("\n")
 
+        # -- Providers (which API keys are set this session) --
+        try:
+            import os
+            from opendot.providers import CONNECTABLE_PROVIDERS
+            connected_providers = [n for n, var in CONNECTABLE_PROVIDERS if os.environ.get(var)]
+        except Exception:  # noqa: BLE001
+            connected_providers = []
+        if connected_providers:
+            self._section(t, "Providers")
+            for name in connected_providers:
+                t.append("• ", style="dim")
+                t.append(f"{name} ", style="green")
+                t.append("✓\n", style="green")
+            t.append("\n")
+
+        # -- Composio (show once a key is set; then list enabled apps) --
+        try:
+            from opendot import composio_tools
+            cx_configured = composio_tools.is_configured()
+            capps = composio_tools.enabled_apps()
+        except Exception:  # noqa: BLE001
+            cx_configured, capps = False, []
+        if cx_configured:
+            self._section(t, "Composio")
+            t.append("connected ", style="green")
+            t.append("✓\n", style="green")
+            for slug in capps:
+                t.append("• ", style="dim")
+                t.append(f"{slug}\n", style="green")
+            if not capps:
+                t.append("no apps enabled yet\n", style="dim")
+            t.append("\n")
+
         # -- Ledger (the differentiator) --
         self._section(t, "Ledger")
         t.append("undoable ↺ · irreversible ✗\n", style="dim")
@@ -190,14 +430,19 @@ class OpendotTUI(App):
     #input { height: 5; border: round $accent; margin: 0 1; padding: 0 1; }
     #modeline { height: 1; margin: 0 1; color: $text-muted; }
 
-    /* Each message type is a visually distinct block. */
+    /* Slash-command autocomplete popup — sits just above the input. */
+    #cmdpopup { height: auto; max-height: 10; margin: 0 1; padding: 0;
+                border: round $panel; background: $surface; }
+    #cmdpopup > .option-list--option-highlighted { background: $accent; color: $text; }
+
+    /* Message blocks — understated, opencode-style. The answer is the only
+       block with real visual weight; everything else recedes. */
     .msg { margin: 1 0 0 0; }
-    .user   { background: $boost; color: $text; text-style: bold;
-              border-left: thick $accent; padding: 0 1; }
-    .think  { color: $text-muted; text-style: italic; margin: 0 0 0 2; }
-    .answer { color: $text; border-left: thick $success; padding: 0 1; }
-    .tool   { color: $accent; text-style: bold; margin: 1 0 0 0; }
-    .toolout{ color: $text-muted; margin: 0 0 0 2; }
+    .user   { color: $text; border-left: solid $accent; padding: 0 1; }
+    .think  { color: $text-muted; margin: 0 0 0 2; }
+    .answer { color: $text; border-left: solid #2dd4bf; padding: 0 1; }
+    .tool   { color: $text-muted; margin: 1 0 0 2; }
+    .toolout{ color: $text-muted; margin: 0 0 0 4; }
     .err    { color: $error; text-style: bold; border-left: thick $error; padding: 0 1; }
     .sys    { color: $text-muted; text-style: italic; }
     """
@@ -227,13 +472,19 @@ class OpendotTUI(App):
 
     def compose(self) -> ComposeResult:
         from textual.containers import Vertical
+        from textual.widgets import OptionList
 
         yield Header(show_clock=False)
         with Horizontal(id="body"):
             # Left column: transcript fills, input + mode line pinned at its bottom.
             with Vertical(id="main"):
                 yield VerticalScroll(id="transcript")
-                yield Input(placeholder="Ask opendot…  (/help /log /undo /clear /compact)", id="input")
+                # Slash-command autocomplete — hidden until the line starts with '/'.
+                popup = OptionList(id="cmdpopup")
+                popup.display = False
+                popup.can_focus = False  # keep typing focus in the input
+                yield popup
+                yield Input(placeholder="Ask opendot…  (type / for commands)", id="input")
                 yield Static(self._mode_line(), id="modeline")
             yield Sidebar(self.agent)
         yield Footer()
@@ -263,8 +514,96 @@ class OpendotTUI(App):
     def _refresh_sidebar(self) -> None:
         self.query_one(Sidebar).refresh()
 
+    # -- slash-command autocomplete --
+    def _popup(self):
+        from textual.widgets import OptionList
+        return self.query_one("#cmdpopup", OptionList)
+
+    @property
+    def _popup_open(self) -> bool:
+        return self._popup().display
+
+    def _matches(self, text: str) -> list[tuple[str, str]]:
+        """Commands matching the current input. Active only while the line is a
+        single '/word' with no space yet (i.e. still choosing a command)."""
+        if not text.startswith("/") or " " in text:
+            return []
+        q = text[1:].lower()
+        return [(n, d) for n, d in SLASH_COMMANDS if n[1:].lower().startswith(q)]
+
+    def _sync_popup(self, text: str) -> None:
+        from textual.widgets.option_list import Option
+
+        matches = self._matches(text)
+        popup = self._popup()
+        if not matches:
+            popup.display = False
+            return
+        popup.display = True  # display first so the widget has a real width
+        popup.clear_options()
+        # Right-align descriptions to the popup's right edge. content_size is
+        # reliable now that display=True and layout has settled; fall back to the
+        # main column width (terminal minus 34-col sidebar and margins).
+        width = popup.content_size.width
+        if width <= 0:
+            width = max(20, self.size.width - 34 - 6)
+        for name, desc in matches:
+            gap = max(2, width - len(name) - len(desc))
+            line = Text.assemble((name, "bold"), (" " * gap, ""), (desc, "dim"))
+            popup.add_option(Option(line, id=name))
+        popup.highlighted = 0
+
+    def _highlighted_command(self) -> str | None:
+        popup = self._popup()
+        if popup.highlighted is None:
+            return None
+        return self._popup().get_option_at_index(popup.highlighted).id
+
+    def _accept_popup(self, *, run: bool) -> None:
+        """Pick the highlighted command. If ``run``, execute it immediately
+        (Enter); otherwise just complete it into the input so the user can add
+        an argument (Tab), e.g. `/undo 4` or `/model gpt-5.1`."""
+        name = self._highlighted_command()
+        if name is None:
+            return
+        inp = self.query_one("#input", Input)
+        self._popup().display = False
+        if run:
+            inp.value = ""
+            self._slash(name)
+        else:
+            inp.value = name + " "
+            inp.cursor_position = len(inp.value)
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "input":
+            self._sync_popup(event.value)
+
+    def on_key(self, event) -> None:
+        """Drive the autocomplete popup from the keyboard while it's open."""
+        if not self._popup_open:
+            return
+        popup = self._popup()
+        if event.key == "down":
+            popup.action_cursor_down(); event.stop(); event.prevent_default()
+        elif event.key == "up":
+            popup.action_cursor_up(); event.stop(); event.prevent_default()
+        elif event.key == "tab":
+            self._accept_popup(run=False); event.stop(); event.prevent_default()
+        elif event.key == "escape":
+            popup.display = False; event.stop(); event.prevent_default()
+
     # -- input handling --
     async def on_input_submitted(self, event: Input.Submitted) -> None:
+        # Only the main prompt submits chat. A submit from any other Input
+        # (e.g. a modal's password/search field) must never become a message —
+        # modals also .stop() it, this is defence in depth so secrets can't leak.
+        if event.input.id != "input":
+            return
+        # If the popup is open, Enter runs the highlighted command immediately.
+        if self._popup_open:
+            self._accept_popup(run=True)
+            return
         text = event.value.strip()
         self.query_one("#input", Input).value = ""
         if not text or self._busy:
@@ -285,7 +624,7 @@ class OpendotTUI(App):
         except Exception:  # noqa: BLE001
             who = "you"
         now = datetime.datetime.now().strftime("%H:%M")
-        header = Text.assemble((who, "bold"), (f"  {now}", "dim"))
+        header = Text.assemble((who, "dim"), (f"  {now}", "dim"))
         self._write(Text.assemble(header, "\n", (text, "")), "user")
         # Use the message as the sidebar's task title (first ~40 chars).
         sb = self.query_one(Sidebar)
@@ -299,7 +638,7 @@ class OpendotTUI(App):
         cmd = cmd.lower()
         a = self.agent
         if cmd == "help":
-            self._write("commands: /log /undo [id] /clear /compact /model /help", "sys")
+            self._write("commands: /log /undo [id] /clear /compact /model /provider /mcp /composio /help", "sys")
         elif cmd == "clear":
             a.reset()
             self._write("context cleared", "sys")
@@ -307,13 +646,179 @@ class OpendotTUI(App):
             n = a.compact()
             self._write(f"compacted: dropped {n} old message(s)", "sys")
         elif cmd == "model":
-            self._write(f"model: {a.config.model}", "sys")
+            # A bare arg sets the model directly; otherwise open the picker.
+            if rest.strip():
+                self._set_model(rest.strip())
+            else:
+                self.run_worker(self._pick_model(), exclusive=False)
+        elif cmd in ("provider", "connect"):
+            self.run_worker(self._connect_provider(), exclusive=False)
+        elif cmd == "mcp":
+            self.run_worker(self._manage_mcp(), exclusive=False)
+        elif cmd == "composio":
+            self.run_worker(self._manage_composio(), exclusive=False)
         elif cmd == "log":
             self.action_log()
         elif cmd == "undo":
             self._do_undo(rest.strip() or None)
         else:
             self._write(f"unknown command: /{cmd}", "sys")
+
+    # -- model / provider pickers --
+    def _set_model(self, model: str) -> None:
+        """Switch the live model and refresh the sidebar (which shows it)."""
+        self.agent.config.model = model
+        self._write(f"model → {model}", "sys")
+        self._refresh_sidebar()
+        # Nudge if the key for this model isn't set yet.
+        from opendot.providers import env_var_for
+        import os
+        var = env_var_for(model)
+        if var and not os.environ.get(var):
+            self._write(f"note: {var} is not set — use /provider to connect.", "sys")
+
+    async def _pick_model(self) -> None:
+        from opendot.providers import list_models, provider_of
+
+        models = list_models()
+        if not models:
+            self._write("model list unavailable (litellm registry not found); "
+                        "use  /model <id>  to set one directly.", "sys")
+            return
+        # (value, label, group) sorted by provider then model for grouped display.
+        items = sorted(
+            ((m, m, provider_of(m)) for m in models),
+            key=lambda t: (t[2], t[1]),
+        )
+        chosen = await self.push_screen_wait(SearchListModal("Select model", items))
+        if chosen:
+            self._set_model(chosen)
+
+    async def _connect_provider(self) -> None:
+        from opendot.providers import CONNECTABLE_PROVIDERS, register_key
+
+        items = [(var, name, "Providers") for name, var in CONNECTABLE_PROVIDERS]
+        var = await self.push_screen_wait(SearchListModal("Connect a provider", items))
+        if not var:
+            return
+        name = next((n for n, v in CONNECTABLE_PROVIDERS if v == var), var)
+        key = await self.push_screen_wait(ApiKeyModal(name, var))
+        if not key:
+            return
+        register_key(var, key)
+        self._write(f"✓ {name} connected for this session.", "sys")
+        self._write(f"to persist, add to your shell:  export {var}=…", "sys")
+        self._refresh_sidebar()
+
+    async def _manage_mcp(self) -> None:
+        from opendot.mcp import add_mcp_server, load_mcp_config
+
+        servers = load_mcp_config()
+        mgr = getattr(self.agent, "mcp", None)
+        connected = set(mgr.connected) if mgr else set()
+        errors = dict(mgr.errors) if mgr else {}
+
+        # Build the list: each server with a status glyph, then an Add entry.
+        items: list[tuple[str, str, str]] = []
+        for name, spec in servers.items():
+            target = spec.get("url") or " ".join(
+                [spec.get("command", "")] + spec.get("args", [])
+            )
+            if name in connected:
+                n = sum(1 for mt in mgr.tools if mt.server == name)
+                status = f"✓ {n} tools"
+            elif name in errors:
+                status = "✗ failed"
+            else:
+                status = "· not connected"
+            items.append((f"server:{name}", f"{name}   {target[:40]}   {status}", "Servers"))
+        items.append(("__add__", "➕ Add a server…", ""))
+
+        chosen = await self.push_screen_wait(SearchListModal("MCP servers", items))
+        if chosen != "__add__":
+            return  # selecting a server is view-only for now
+        result = await self.push_screen_wait(McpAddModal())
+        if not result:
+            return
+        add_mcp_server(result["name"], result["spec"])
+        self._write(
+            f"✓ added MCP server '{result['name']}' — it connects on next launch "
+            f"(restart opendot).",
+            "sys",
+        )
+
+    async def _manage_composio(self) -> None:
+        import asyncio
+        import webbrowser
+
+        from opendot import composio_tools as cx
+
+        if not cx.composio_available():
+            self._write("Composio isn't installed. Run:  pip install 'opendot[composio]'", "sys")
+            return
+
+        # First run (or no key yet): ask for the Composio API key.
+        if not cx.is_configured():
+            key = await self.push_screen_wait(ApiKeyModal("Composio", "COMPOSIO_API_KEY"))
+            if not key:
+                return
+            cx.set_api_key(key)
+            self._write("✓ Composio connected. Run /composio again to browse apps.", "sys")
+            self._refresh_sidebar()
+            return
+
+        # Configured: list apps (marking connected/enabled ones), let the user pick.
+        self._write("loading Composio apps…", "sys")
+        apps = await asyncio.to_thread(cx.list_apps)
+        if not apps:
+            self._write("couldn't load Composio apps (check your key / connection).", "sys")
+            return
+        connected = await asyncio.to_thread(cx.list_connected)
+        enabled = set(cx.enabled_apps())
+
+        items: list[tuple[str, str, str]] = []
+        for app in apps:
+            slug = app["slug"]
+            if slug in enabled:
+                mark = "✓ enabled"
+            elif slug in connected:
+                mark = "· connected"
+            else:
+                mark = ""
+            label = f"{app['name']}   {slug}   {mark}".rstrip()
+            items.append((slug, label, "Apps"))
+
+        slug = await self.push_screen_wait(SearchListModal("Composio apps", items))
+        if not slug:
+            return
+
+        # Already enabled → nothing to do.
+        if slug in enabled:
+            self._write(f"{slug} is already enabled.", "sys")
+            return
+
+        # Connect (OAuth → browser + wait, or direct connector → immediate).
+        self._write(f"connecting {slug}…", "sys")
+        res = await asyncio.to_thread(cx.begin_connect, slug)
+        if res.error:
+            self._write(f"couldn't connect {slug}: {res.error}", "sys")
+            return
+        if res.needs_auth and res.redirect_url:
+            self._write(f"→ opening your browser to authorize {slug}…", "sys")
+            webbrowser.open(res.redirect_url)
+            self._write(f"  if it didn't open: {res.redirect_url}", "sys")
+            try:
+                await asyncio.to_thread(res.request.wait_for_connection, 180)
+            except Exception as exc:  # noqa: BLE001
+                self._write(f"authorization didn't complete: {exc}", "sys")
+                return
+        cx.add_enabled_app(slug)
+        self._write(
+            f"✓ {slug} connected and enabled. Its tools load on next launch "
+            f"(restart opendot).",
+            "sys",
+        )
+        self._refresh_sidebar()
 
     async def _run_turn(self, message: str) -> None:
         mode = None
@@ -334,15 +839,18 @@ class OpendotTUI(App):
                     if mode != "think":
                         flush_answer()
                         mode = "think"
-                    self._write(Text(ev.text.rstrip(), style="italic"), "think")
+                        self._write(Text("Thought", style="dim bold"), "think")
+                    self._write(Text(ev.text.rstrip(), style="dim italic"), "think")
                 elif ev.type == "text":
                     mode = "answer"
                     buf.append(ev.text)
                 elif ev.type == "tool_start":
                     flush_answer(); mode = None
-                    icon = _TOOL_ICONS.get(ev.tool, "▸")
-                    args = ", ".join(f"{k}={v!r}"[:50] for k, v in ev.args.items())
-                    self._write(Text(f"{icon} {ev.tool}  ", style="bold").append(f"({args})", style="dim"), "tool")
+                    args = "  ".join(str(v)[:50] for v in ev.args.values())
+                    line = Text("→ ", style="dim").append(ev.tool, style="bold")
+                    if args:
+                        line.append("  " + args, style="dim")
+                    self._write(line, "tool")
                 elif ev.type == "tool_end":
                     self._write(_render_tool_result(ev.tool, ev.result), "toolout")
                     self._refresh_sidebar()

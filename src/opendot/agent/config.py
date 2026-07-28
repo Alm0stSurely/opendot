@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 
 # A sensible default that works if the user has an OpenAI key; over/ridden via
 # --model, the OPENDOT_MODEL env var, or config.
-DEFAULT_MODEL = os.environ.get("OPENDOT_MODEL", "gpt-4o")
+DEFAULT_MODEL = os.environ.get("OPENDOT_MODEL", "gpt-5.1")
 
 
 @dataclass
