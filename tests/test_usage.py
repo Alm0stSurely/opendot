@@ -71,12 +71,22 @@ def test_streaming_usage_counted_once_not_doubled():
 
 
 def test_add_response_cost_from_tokens():
-    """Cost is derived from token counts + model (works for stream chunks),
-    not only from completion_cost."""
-    import litellm
+    """Cost is derived from token counts + model (works for stream chunks), via
+    cost_per_token — not the completion_cost helper. Stubbed so it doesn't depend
+    on LiteLLM's live pricing data."""
+    calls = {"completion_cost": 0}
+
+    class _StubLiteLLM(types.SimpleNamespace):
+        def cost_per_token(self, model, prompt_tokens, completion_tokens):
+            return (0.01, 0.02)
+
+        def completion_cost(self, **kw):  # must NOT be used when tokens are present
+            calls["completion_cost"] += 1
+            return 999.0
 
     u = Usage()
     resp = types.SimpleNamespace(usage=_Usage())
-    u.add_response(resp, litellm, model="gpt-4o")
+    u.add_response(resp, _StubLiteLLM(), model="gpt-4o")
     assert u.total_tokens == 1500
-    assert u.cost_usd > 0  # real pricing for gpt-4o
+    assert round(u.cost_usd, 4) == 0.03          # 0.01 + 0.02 from cost_per_token
+    assert calls["completion_cost"] == 0         # token-based path was used

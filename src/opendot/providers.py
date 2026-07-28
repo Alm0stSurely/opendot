@@ -47,7 +47,10 @@ def known_key_vars() -> list[str]:
             return vars_
     except Exception:  # noqa: BLE001
         pass
-    return list(dict.fromkeys(_ENV_OVERRIDES.values()))
+    # Catalog unavailable: fall back to the common providers (_AUTO_ORDER covers
+    # the <PROVIDER>_API_KEY ones) plus the override exceptions — so a user with
+    # e.g. OPENAI_API_KEY still shows up in the sidebar.
+    return list(dict.fromkeys(_AUTO_ORDER + list(_ENV_OVERRIDES.values())))
 
 
 def _env_for_provider_id(provider: str) -> str | None:

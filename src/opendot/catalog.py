@@ -7,8 +7,8 @@ for what's available and routable:
   can actually route to. We only offer these in ``/provider`` so a key the user
   enters will actually work.
 * **Models** come from LiteLLM's registry (``litellm.model_cost``), filtered to
-  those providers and to text chat models only (``mode`` in {chat, completion})
-  — no image / audio / video / embedding models.
+  those providers and to text chat models only (``mode`` in {chat, completion,
+  responses}) — no image / audio / video / embedding models.
 
 No network, no external database, no hardcoded model strings.
 """

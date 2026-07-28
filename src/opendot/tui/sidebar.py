@@ -69,7 +69,8 @@ class Sidebar(Static):
         if connected_providers:
             self._section(t, "Providers")
             for var in connected_providers:
-                label = var.replace("_API_KEY", "").replace("_TOKEN", "").title()
+                base = var.replace("_API_KEY", "").replace("_TOKEN", "")
+                label = base.replace("_", " ").title()  # no stray underscores
                 t.append("• ", style="dim")
                 t.append(f"{label} ", style="green")
                 t.append("✓\n", style="green")

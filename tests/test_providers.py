@@ -58,7 +58,8 @@ def test_model_for_available_key_handles_huggingface(monkeypatch, fake_catalog):
 
 
 def test_env_var_for_known_providers():
-    # Resolved live via litellm.get_llm_provider — covers bare + prefixed forms.
+    # Resolved by _provider_id_for (pure lookup: prefix or registry) — covers
+    # bare + prefixed forms.
     assert p.env_var_for("gpt-4o") == "OPENAI_API_KEY"
     assert p.env_var_for("claude-opus-4-5") == "ANTHROPIC_API_KEY"
     assert p.env_var_for("deepseek/deepseek-chat") == "DEEPSEEK_API_KEY"

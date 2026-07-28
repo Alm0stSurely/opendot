@@ -35,7 +35,7 @@ class Usage:
                 self.prompt_tokens += p
                 self.completion_tokens += c
                 self.total_tokens += int(getattr(u, "total_tokens", 0) or 0) or (p + c)
-        except Exception:  # noqa: BLE001
+        except Exception:  # noqa: BLE001,S110 - accounting is best-effort, never fatal
             pass
         # Prefer token-based cost (reliable for stream chunks); else try the
         # whole-response helper.
