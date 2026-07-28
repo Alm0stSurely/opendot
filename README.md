@@ -1,6 +1,23 @@
-# opendot
+<div align="center">
+
+```
+                          _       _
+  ___  _ __   ___ _ __   __| | ___ | |_
+ / _ \| '_ \ / _ \ '_ \ / _` |/ _ \| __|
+| (_) | |_) |  __/ | | | (_| | (_) | |_
+ \___/| .__/ \___|_| |_|\__,_|\___/ \__|
+      |_|
+```
 
 **An interactive terminal AI agent you can fully undo.**
+
+[![CI](https://github.com/vedaant00/opendot/actions/workflows/ci.yml/badge.svg)](https://github.com/vedaant00/opendot/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/opendot.svg)](https://pypi.org/project/opendot/)
+[![Downloads](https://static.pepy.tech/badge/opendot)](https://pepy.tech/project/opendot)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+</div>
+
 
 opendot works directly on your real files and shell — but unlike other terminal
 agents, **every action it takes is snapshotted first**, so you can see exactly
@@ -11,17 +28,6 @@ they run, with an honest note about what can't be undone.
 
 That's the point of opendot: an agent you can let loose because nothing it does
 is a surprise, and (almost) nothing is irreversible.
-
-```text
-you › refactor utils.py and delete the old helpers
-▸ read_file(path='utils.py')
-▸ write_file(path='utils.py')
-▸ run_shell(command='rm helpers_old.py')
-  done.
-
-$ opendot log        # see everything it did
-$ opendot undo       # walk it back, byte-for-byte
-```
 
 ## Install
 
