@@ -24,6 +24,7 @@ from pathlib import Path
 _SAFE_COMMANDS = {
     "ls", "cat", "head", "tail", "pwd", "echo", "grep", "rg", "find", "wc",
     "diff", "tree", "stat", "file", "which", "env", "date", "whoami",
+    "clear", "cls",  # harmless read-only terminal commands
     "python", "python3", "node", "pytest", "go", "cargo",  # running code in-workspace
     "touch", "mkdir", "cp", "mv",  # in-workspace fs ops (snapshot covers them)
     "sed", "awk", "sort", "uniq", "cut", "tr",

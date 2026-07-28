@@ -28,13 +28,50 @@ from textual.widgets import Button, Footer, Header, Input, Static
 from opendot.agent.loop import Agent
 
 
+# Pre-warm textual-image's terminal capability probe at import time — i.e. BEFORE
+# the Textual app puts the terminal in raw mode and focuses the input. The probe
+# sends a Device Attributes query ("\e[c") and reads the reply; if it runs later
+# (lazily during compose), that reply ("^[?1;2c") leaks into the focused input.
+# Guarded to a real TTY so it never hangs in tests / piped / one-shot mode.
+import sys as _sys
+try:
+    if _sys.stdin.isatty() and _sys.stdout.isatty():
+        from textual_image.widget import Image as _ProbeImage  # noqa: F401 - import triggers the probe
+except Exception:  # noqa: BLE001 - probe/import failure must never block startup
+    pass
+
+
+# Path to the logo image shown on the welcome screen (rendered via textual-image).
+from pathlib import Path as _Path
+_LOGO_PATH = _Path(__file__).resolve().parent.parent.parent / "assets" / "logo-full.png"
+
+
+def _row_bar(left: str, right: str, right_style: str = "dim", left_style: str = ""):
+    """A full-width row: left text, right text flush to the right edge.
+
+    Uses a grid so the right column auto-aligns to the widget's actual width at
+    render time (no manual padding / size measurement)."""
+    from rich.table import Table
+
+    grid = Table.grid(expand=True)
+    grid.add_column(justify="left", ratio=1)
+    grid.add_column(justify="right")
+    grid.add_row(Text(left, style=left_style), Text(right, style=right_style))
+    return grid
+
+
+def _title_bar(title: str, hint: str = "esc cancel"):
+    """A modal title row: bold title on the left, dim hint flush to the right."""
+    return _row_bar(title, hint, right_style="dim", left_style="bold")
+
+
 class ConfirmModal(ModalScreen[bool]):
     """A blocking yes/no modal for irreversible commands. Returns True to run."""
 
     CSS = """
     ConfirmModal { align: center middle; }
     #box { width: 70%; max-width: 90; height: auto; padding: 1 2;
-           border: thick $warning; background: $surface; }
+           border: round $warning; background: $surface; }
     #q { margin-bottom: 1; }
     #buttons { height: auto; align-horizontal: center; }
     Button { margin: 0 1; }
@@ -72,7 +109,7 @@ class SearchListModal(ModalScreen[str | None]):
     CSS = """
     SearchListModal { align: center middle; }
     #box { width: 70%; max-width: 90; height: 80%; padding: 1 2;
-           border: thick $accent; background: $surface; }
+           border: round $accent; background: $surface; }
     #title { text-style: bold; margin-bottom: 1; }
     #search { margin-bottom: 1; }
     #list { height: 1fr; }
@@ -97,12 +134,7 @@ class SearchListModal(ModalScreen[str | None]):
         self.query_one("#search", Input).focus()
 
     def _set_title(self) -> None:
-        # "esc cancel" flush right: pad the gap to the title widget's width.
-        title = self.query_one("#title", Static)
-        hint = "esc cancel"
-        width = title.content_size.width or 60
-        gap = max(4, width - len(self._title) - len(hint))
-        title.update(Text.assemble((self._title, "bold"), (" " * gap, ""), (hint, "dim")))
+        self.query_one("#title", Static).update(_title_bar(self._title, "esc cancel"))
 
     def _populate(self, query: str) -> None:
         from textual.widgets import OptionList
@@ -113,13 +145,17 @@ class SearchListModal(ModalScreen[str | None]):
         ol.clear_options()
         last_group = None
         self._values: list[str] = []
-        for value, label, group in self._items:
+        for item in self._items:
+            value, label, group = item[0], item[1], item[2]
+            status = item[3] if len(item) > 3 else ""  # optional right-aligned status
             if q and q not in label.lower():
                 continue
             if group and group != last_group:
                 ol.add_option(Option(Text(group.upper(), style="bold magenta"), disabled=True))
                 last_group = group
-            ol.add_option(Option(label, id=str(len(self._values))))
+            # Status (e.g. "✓ enabled") is rendered flush-right via a grid.
+            prompt = _row_bar(label, status, "green") if status else Text(label)
+            ol.add_option(Option(prompt, id=str(len(self._values))))
             self._values.append(value)
         if self._values:
             ol.highlighted = 1 if (self._items and self._items[0][2]) else 0
@@ -163,8 +199,9 @@ class ApiKeyModal(ModalScreen[str | None]):
     CSS = """
     ApiKeyModal { align: center middle; }
     #box { width: 60%; max-width: 80; height: auto; padding: 1 2;
-           border: thick $accent; background: $surface; }
-    #title { text-style: bold; margin-bottom: 1; }
+           border: round $accent; background: $surface; }
+    #title { text-style: bold; }
+    #subtitle { color: $text-muted; text-style: italic; margin-bottom: 1; }
     """
 
     def __init__(self, provider: str, env_var: str) -> None:
@@ -174,18 +211,11 @@ class ApiKeyModal(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="box"):
-            yield Static(id="title")
+            yield Static(_title_bar(f"Connect {self._provider}"), id="title")
+            yield Static(f"sets {self._env_var} for this session", id="subtitle")
             yield Input(placeholder="Paste API key…", password=True, id="key")
 
     def on_mount(self) -> None:
-        title = self.query_one("#title", Static)
-        head, hint = f"Connect {self._provider}", "esc cancel"
-        width = title.content_size.width or 60
-        gap = max(4, width - len(head) - len(hint))
-        title.update(Text.assemble(
-            (head, "bold"), (" " * gap, ""), (hint + "\n", "dim"),
-            (f"sets {self._env_var} for this session", "dim italic"),
-        ))
         self.query_one("#key", Input).focus()
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -208,7 +238,7 @@ class McpAddModal(ModalScreen[dict | None]):
     CSS = """
     McpAddModal { align: center middle; }
     #box { width: 70%; max-width: 90; height: auto; padding: 1 2;
-           border: thick $accent; background: $surface; }
+           border: round $accent; background: $surface; }
     #title { text-style: bold; margin-bottom: 1; }
     Input { margin-bottom: 1; }
     #hint { color: $text-muted; text-style: italic; }
@@ -216,7 +246,7 @@ class McpAddModal(ModalScreen[dict | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="box"):
-            yield Static(id="title")
+            yield Static(_title_bar("Add an MCP server"), id="title")
             yield Input(placeholder="name (e.g. github, supabase)", id="name")
             yield Input(placeholder="https://…/mcp   OR   npx -y @scope/server args…", id="target")
             yield Input(placeholder="Authorization header (remote only, optional)", id="header")
@@ -226,11 +256,6 @@ class McpAddModal(ModalScreen[dict | None]):
             )
 
     def on_mount(self) -> None:
-        title = self.query_one("#title", Static)
-        head, hint = "Add an MCP server", "esc cancel"
-        width = title.content_size.width or 60
-        gap = max(4, width - len(head) - len(hint))
-        title.update(Text.assemble((head, "bold"), (" " * gap, ""), (hint, "dim")))
         self.query_one("#name", Input).focus()
 
     def _submit(self) -> None:
@@ -419,19 +444,42 @@ class OpendotTUI(App):
     ENABLE_COMMAND_PALETTE = True  # ctrl+p
 
     CSS = """
-    Screen { layout: vertical; }
+    Screen { layout: vertical; layers: base overlay; }
     #body { height: 1fr; }                     /* main column + sidebar fill the middle */
     #main { width: 3fr; height: 1fr; }         /* left column: transcript + input + mode */
     #transcript { height: 1fr; padding: 0 1; } /* fills the space above the input */
     #sidebar { width: 34; height: 1fr; padding: 1; border-left: solid $panel; }
+
+    /* Welcome layout: small centered logo with the input right below it,
+       the whole group centered in the screen (opencode-style). #main's
+       `align: center middle` centers the children — no auto margins needed. */
+    /* The logo wrapper is a full-width Center; hidden in the normal layout. */
+    #welcome-wrap { display: none; }
+    #welcome { width: auto; height: 6; }
+    Screen.-welcome #transcript { display: none; }
+    Screen.-welcome #sidebar { display: none; }
+    /* Anchor the welcome group near the top-center with fixed padding rather
+       than dynamic middle-centering — so opening the command popup grows the
+       column downward instead of re-centering (and shoving) the logo. */
+    Screen.-welcome #main { width: 1fr; height: 1fr; align: center top; padding-top: 9; }
+    /* All three welcome children share width:60% so #main's align centers them
+       as one column. The logo image inside is centered by its Center wrapper. */
+    Screen.-welcome #welcome-wrap {
+        display: block; width: 60%; max-width: 90; height: auto; margin-bottom: 1;
+    }
+    Screen.-welcome #input { width: 70%; max-width: 100; margin: 0; }
+    Screen.-welcome #modeline { width: 70%; max-width: 100; margin: 0; }
 
     /* Input: taller box, bounded by the left column so it never crosses the
        sidebar (opencode-style). Mode line sits just under it. */
     #input { height: 5; border: round $accent; margin: 0 1; padding: 0 1; }
     #modeline { height: 1; margin: 0 1; color: $text-muted; }
 
-    /* Slash-command autocomplete popup — sits just above the input. */
-    #cmdpopup { height: auto; max-height: 10; margin: 0 1; padding: 0;
+    /* Slash-command autocomplete popup — a FLOATING overlay on its own layer,
+       so it renders on top of the logo/transcript without pushing them down.
+       It's absolutely positioned each time it opens, just above the input
+       (see _position_popup), matching the input's x and width. */
+    #cmdpopup { layer: overlay; height: auto; max-height: 10; padding: 0;
                 border: round $panel; background: $surface; }
     #cmdpopup > .option-list--option-highlighted { background: $accent; color: $text; }
 
@@ -471,23 +519,91 @@ class OpendotTUI(App):
             return False
 
     def compose(self) -> ComposeResult:
-        from textual.containers import Vertical
+        from textual.containers import Center, Vertical
         from textual.widgets import OptionList
 
         yield Header(show_clock=False)
         with Horizontal(id="body"):
             # Left column: transcript fills, input + mode line pinned at its bottom.
             with Vertical(id="main"):
+                # Welcome logo — the real PNG, shown until the first message.
+                # textual-image auto-picks TGP/Sixel on capable terminals and
+                # falls back to Unicode blocks elsewhere. If it can't load at
+                # all, we degrade to a text wordmark. Wrapped in Center so the
+                # auto-width image is reliably horizontally centred.
+                with Center(id="welcome-wrap"):
+                    yield self._welcome_widget()
                 yield VerticalScroll(id="transcript")
-                # Slash-command autocomplete — hidden until the line starts with '/'.
-                popup = OptionList(id="cmdpopup")
-                popup.display = False
-                popup.can_focus = False  # keep typing focus in the input
-                yield popup
-                yield Input(placeholder="Ask opendot…  (type / for commands)", id="input")
+                yield Input(placeholder='Ask opendot…   "fix broken tests"', id="input")
                 yield Static(self._mode_line(), id="modeline")
             yield Sidebar(self.agent)
+        # Slash-command autocomplete — a floating overlay (own layer) so it
+        # renders ON TOP of the transcript/logo without pushing anything down.
+        popup = OptionList(id="cmdpopup")
+        popup.display = False
+        popup.can_focus = False  # keep typing focus in the input
+        yield popup
         yield Footer()
+
+    def _welcome_widget(self):
+        """The welcome logo. Real PNG via textual-image where supported, with a
+        text wordmark fallback if the package/image can't load.
+
+        The logo PNG is transparent; terminal image protocols flatten alpha onto
+        a solid colour. So we pre-composite it onto the TUI's own background
+        colour (#121212) — then the image's edges blend into the screen instead
+        of showing a black box."""
+        try:
+            from textual_image.widget import Image
+            if _LOGO_PATH.exists():
+                return Image(self._logo_on_theme_bg(), id="welcome")
+        except Exception:  # noqa: BLE001 - any failure → text fallback
+            pass
+        return Static(Text("opendot", style="bold"), id="welcome")
+
+    def _logo_on_theme_bg(self):
+        """Load the transparent logo, trim its transparent margins (so the
+        wordmark centres correctly), and flatten it onto the theme background so
+        there's no visible box. Returns a PIL image (or the path on failure).
+
+        ANSI themes report their background as an ANSI sentinel (no real RGB —
+        the terminal owns it), so we can't pick a matching colour; in that case
+        we leave the PNG transparent and let the image protocol composite it."""
+        try:
+            from PIL import Image as PILImage
+            logo = PILImage.open(_LOGO_PATH).convert("RGBA")
+            bbox = logo.getbbox()  # tight box around non-transparent pixels
+            if bbox:
+                logo = logo.crop(bbox)
+
+            bg = self.screen.styles.background
+            # ANSI-defaulted background: real colour unknown → don't composite.
+            if bg is None or getattr(bg, "ansi", None) is not None:
+                return logo
+            canvas = PILImage.new("RGBA", logo.size, (bg.r, bg.g, bg.b, 255))
+            canvas.alpha_composite(logo)
+            return canvas.convert("RGB")
+        except Exception:  # noqa: BLE001
+            return str(_LOGO_PATH)
+
+    def watch_theme(self, theme_name: str) -> None:
+        """Re-composite the welcome logo when the theme changes, so its
+        background keeps matching the (possibly light) screen. Only matters
+        while the welcome screen is still up — it's gone after the first message.
+        Recomposites in place (Image.image is settable) to avoid a widget swap."""
+        def _rebuild():
+            try:
+                if not self.screen.has_class("-welcome"):
+                    return
+                w = self.query_one("#welcome")
+                if hasattr(w, "image"):  # textual-image widget; text fallback has none
+                    w.image = self._logo_on_theme_bg()
+            except Exception:  # noqa: BLE001 - never let a theme change crash the UI
+                pass
+
+        # Defer: when watch_theme fires, screen.styles.background still holds the
+        # OLD theme colour. Recompute after the refresh applies the new theme.
+        self.call_after_refresh(_rebuild)
 
     def _mode_line(self):
         return Text.assemble(
@@ -496,10 +612,24 @@ class OpendotTUI(App):
             ("ctrl+p ", "bold cyan"), ("commands", "dim"),
         )
 
+    def _dismiss_welcome(self) -> None:
+        """Hide the welcome logo and reveal the normal transcript+sidebar layout.
+        Called once, on the first user message."""
+        if self.screen.has_class("-welcome"):
+            self.screen.remove_class("-welcome")
+
     def on_mount(self) -> None:
         self.title = "opendot"
         self.sub_title = self.agent.config.workdir
-        self._write("opendot ready. Type a message, or /help.", "sys")
+        # Drop the ANSI themes — their background is the terminal's (unknown to
+        # us), so the welcome logo can't be composited to match them.
+        for _t in ("ansi-dark", "ansi-light"):
+            try:
+                self.unregister_theme(_t)
+            except Exception:  # noqa: BLE001
+                pass
+        # Start on the welcome screen (logo only); first message reveals the rest.
+        self.screen.add_class("-welcome")
         self.query_one("#input", Input).focus()
 
     # -- transcript helpers --
@@ -507,6 +637,12 @@ class OpendotTUI(App):
         w = Static(renderable, classes=f"msg {cls}".strip())
         self.query_one("#transcript", VerticalScroll).mount(w)
         self.call_after_refresh(self._scroll_end)
+
+    def _clear_transcript(self) -> None:
+        """Wipe the on-screen transcript (like clearing a terminal). Does not
+        touch the conversation/context — that's what /clear adds."""
+        for w in self.query("#transcript > .msg"):
+            w.remove()
 
     def _scroll_end(self) -> None:
         self.query_one("#transcript", VerticalScroll).scroll_end(animate=False)
@@ -539,19 +675,35 @@ class OpendotTUI(App):
         if not matches:
             popup.display = False
             return
-        popup.display = True  # display first so the widget has a real width
+        popup.display = True
         popup.clear_options()
-        # Right-align descriptions to the popup's right edge. content_size is
-        # reliable now that display=True and layout has settled; fall back to the
-        # main column width (terminal minus 34-col sidebar and margins).
-        width = popup.content_size.width
-        if width <= 0:
-            width = max(20, self.size.width - 34 - 6)
+        # Use the expanding-grid row so the description right-aligns to the popup's
+        # ACTUAL width at render time — no manual padding that can overshoot the
+        # width and wrap the description onto a second line.
         for name, desc in matches:
-            gap = max(2, width - len(name) - len(desc))
-            line = Text.assemble((name, "bold"), (" " * gap, ""), (desc, "dim"))
-            popup.add_option(Option(line, id=name))
+            popup.add_option(Option(_row_bar(name, desc, right_style="dim", left_style="bold"), id=name))
         popup.highlighted = 0
+        # Float it just above the input (after layout settles so heights are known).
+        self.call_after_refresh(self._position_popup)
+
+    def _position_popup(self) -> None:
+        """Place the floating popup directly above the input, matching its x and
+        width. Runs after refresh so the input region and popup height are known."""
+        try:
+            popup = self._popup()
+            if not popup.display:
+                return
+            inp = self.query_one("#input", Input)
+            ir = inp.region
+            # Match the input's outer box. The popup's round border adds 2 cells
+            # of width, so set content width to the input width minus the border.
+            popup.styles.width = max(10, ir.width - 2)
+            popup.styles.height = "auto"
+            # Sit its bottom flush with the top of the input.
+            top = max(0, ir.y - popup.outer_size.height)
+            popup.styles.offset = (ir.x, top)
+        except Exception:  # noqa: BLE001
+            pass
 
     def _highlighted_command(self) -> str | None:
         popup = self._popup()
@@ -612,9 +764,17 @@ class OpendotTUI(App):
         if text.lower() in {"exit", "quit", "/exit", "/quit"}:
             self.exit()
             return
+        # Bare `clear`/`cls` = clear the screen (transcript), like a terminal —
+        # not a shell command and not a conversation reset. `/clear` does both.
+        if text.lower() in {"clear", "cls"}:
+            self._clear_transcript()
+            return
         if text.startswith("/"):
             self._slash(text)
             return
+
+        # First real message leaves the welcome screen for the full layout.
+        self._dismiss_welcome()
 
         # Header: system username + local time, then the message.
         import datetime
@@ -630,8 +790,30 @@ class OpendotTUI(App):
         sb = self.query_one(Sidebar)
         sb.task_title = text[:40] + ("…" if len(text) > 40 else "")
         sb.refresh()
+
+        # If the model's API key isn't set, guide the user instead of letting the
+        # turn fail with a raw provider auth error.
+        if self._missing_key_hint():
+            return
+
         self._busy = True
         self._turn_worker = self.run_worker(self._run_turn(text), exclusive=True)
+
+    def _missing_key_hint(self) -> bool:
+        """If the current model needs an API key that isn't set, write a friendly
+        hint to the transcript and return True (so the caller skips the turn)."""
+        import os
+        from opendot.providers import env_var_for
+
+        var = env_var_for(self.agent.config.model)
+        if not var or os.environ.get(var):
+            return False
+        self._write(Text.assemble(
+            ("no API key for ", "yellow"), (self.agent.config.model, "bold yellow"), ("\n", ""),
+            (f"Set {var}, or run ", "dim"), ("/provider", "bold"),
+            (" to paste one. Keys: github.com/vedaant00/opendot#any-model", "dim"),
+        ), "err")
+        return True
 
     def _slash(self, text: str) -> None:
         cmd, _, rest = text[1:].partition(" ")
@@ -641,7 +823,8 @@ class OpendotTUI(App):
             self._write("commands: /log /undo [id] /clear /compact /model /provider /mcp /composio /help", "sys")
         elif cmd == "clear":
             a.reset()
-            self._write("context cleared", "sys")
+            self._clear_transcript()
+            self._write("cleared — screen and conversation reset", "sys")
         elif cmd == "compact":
             n = a.compact()
             self._write(f"compacted: dropped {n} old message(s)", "sys")
@@ -776,25 +959,34 @@ class OpendotTUI(App):
         connected = await asyncio.to_thread(cx.list_connected)
         enabled = set(cx.enabled_apps())
 
-        items: list[tuple[str, str, str]] = []
+        # Sort enabled apps to the top so they're easy to find/disable.
+        apps.sort(key=lambda a: (a["slug"] not in enabled, a["name"].lower()))
+        items: list[tuple[str, str, str, str]] = []
         for app in apps:
             slug = app["slug"]
-            if slug in enabled:
-                mark = "✓ enabled"
-            elif slug in connected:
-                mark = "· connected"
-            else:
-                mark = ""
-            label = f"{app['name']}   {slug}   {mark}".rstrip()
-            items.append((slug, label, "Apps"))
+            status = "✓ enabled" if slug in enabled else ("· connected" if slug in connected else "")
+            label = f"{app['name']}   {slug}"
+            items.append((slug, label, "Apps", status))
 
         slug = await self.push_screen_wait(SearchListModal("Composio apps", items))
         if not slug:
             return
 
-        # Already enabled → nothing to do.
+        # Already enabled → offer to disable it (remove from opendot's tool set).
         if slug in enabled:
-            self._write(f"{slug} is already enabled.", "sys")
+            choice = await self.push_screen_wait(SearchListModal(
+                f"{slug} — enabled",
+                [("disable", f"Disable {slug} in opendot", "Manage"),
+                 ("keep", "Keep it enabled", "Manage")],
+            ))
+            if choice == "disable":
+                cx.disable_app(slug)
+                self._write(
+                    f"✓ {slug} disabled. Its tools stop loading on next launch "
+                    f"(restart opendot).",
+                    "sys",
+                )
+                self._refresh_sidebar()
             return
 
         # Connect (OAuth → browser + wait, or direct connector → immediate).

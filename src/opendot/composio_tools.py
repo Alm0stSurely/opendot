@@ -86,6 +86,14 @@ def add_enabled_app(slug: str) -> None:
     save_config(cfg)
 
 
+def disable_app(slug: str) -> None:
+    """Remove an app from the enabled list so its tools stop loading. Does not
+    revoke the Composio-side connection (that stays until deleted on Composio)."""
+    cfg = load_config()
+    cfg["apps"] = [s for s in cfg.get("apps", []) if s != slug]
+    save_config(cfg)
+
+
 def composio_available() -> bool:
     try:
         import composio  # noqa: F401

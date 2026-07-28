@@ -81,6 +81,17 @@ def _warn_if_missing_key(model: str) -> None:
 
 
 def _build_agent(model: str, workdir: str, confirm=None) -> Agent:
+    # If the chosen model's API key isn't set but another provider's key is,
+    # switch to that provider so opendot works with whatever key the user has.
+    from opendot.providers import env_var_for, model_for_available_key
+    var = env_var_for(model)
+    if var and not os.environ.get(var):
+        alt = model_for_available_key()
+        if alt and alt != model:
+            console.print(f"[dim]no {var}; using [cyan]{alt}[/cyan] "
+                          f"(found its key in your environment)[/dim]")
+            model = alt
+
     system = DEFAULT_SYSTEM_PROMPT
     ctx = _load_project_context(workdir)
     if ctx:
