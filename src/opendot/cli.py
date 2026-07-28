@@ -139,7 +139,7 @@ def _cmd_mcp(args) -> None:
         servers = load_mcp_config()
         if not servers:
             console.print("[dim]no MCP servers configured.[/dim]")
-            console.print("[dim]add one:  opendot mcp add github npx -y @modelcontextprotocol/server-github[/dim]")
+            console.print("[dim]add one:  opendot mcp add <name> -- <command> [args...]   (or --url <url>)[/dim]")
             return
         console.print("[bold]MCP servers[/bold] (from ~/.opendot/mcp.json)\n")
         for name, spec in servers.items():
