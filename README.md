@@ -34,7 +34,7 @@ they run, with an honest note about what can't be undone.
 That's the point of opendot: an agent you can let loose because nothing it does
 is a surprise, and (almost) nothing is irreversible.
 
-## Install
+## Installation
 
 ```bash
 # try it instantly, no install
@@ -70,15 +70,17 @@ provider you want to use (opendot is BYO-key; it doesn't host models). Pick a
 model and paste a key right inside the chat with `/model` and `/provider`, or
 set the key in your environment and pass `--model`:
 
-| Provider | Env var | Example `--model` | Get a key |
-|----------|---------|-------------------|-----------|
-| OpenAI | `OPENAI_API_KEY` | `gpt-5.1` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
-| Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-4-5` | [console.anthropic.com](https://console.anthropic.com/settings/keys) |
-| Google | `GEMINI_API_KEY` | `gemini/gemini-3-pro` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
-| DeepSeek | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat` | [platform.deepseek.com](https://platform.deepseek.com/api_keys) |
-| Groq | `GROQ_API_KEY` | `groq/llama-3.3-70b-versatile` | [console.groq.com/keys](https://console.groq.com/keys) |
-| Hugging Face | `HF_TOKEN` | `huggingface/together/deepseek-ai/DeepSeek-R1` | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
-| Ollama (local, no key) | — | `ollama/qwen3` | run [ollama.com](https://ollama.com) locally |
+Provider names link to where you get a key.
+
+| Provider | Env var | Example `--model` |
+|----------|---------|-------------------|
+| [OpenAI](https://platform.openai.com/api-keys) | `OPENAI_API_KEY` | `gpt-5.1` |
+| [Anthropic](https://console.anthropic.com/settings/keys) | `ANTHROPIC_API_KEY` | `claude-opus-4-5` |
+| [Google](https://aistudio.google.com/apikey) | `GEMINI_API_KEY` | `gemini/gemini-3-pro` |
+| [DeepSeek](https://platform.deepseek.com/api_keys) | `DEEPSEEK_API_KEY` | `deepseek/deepseek-chat` |
+| [Groq](https://console.groq.com/keys) | `GROQ_API_KEY` | `groq/llama-3.3-70b-versatile` |
+| [Hugging Face](https://huggingface.co/settings/tokens) | `HF_TOKEN` | `huggingface/together/deepseek-ai/DeepSeek-R1` |
+| [Ollama](https://ollama.com) (local, no key) | — | `ollama/qwen3` |
 
 Reasoning models stream their thinking live.
 

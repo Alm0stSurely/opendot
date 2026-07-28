@@ -1,4 +1,4 @@
-"""opendot's full-screen TUI (Textual).
+"""opendot's full-screen TUI (Textual) — the App itself.
 
 Layout:
   ┌───────────────────────────────┬──────────────────┐
@@ -11,8 +11,8 @@ Layout:
   └────────────────────────────────────────────────────┘
 
 The sidebar leads with the reversibility ledger — every action, marked undoable
-or irreversible — which is opendot's reason to exist and something the other
-terminal agents' UIs don't have. Ctrl+Z / the /undo command walk it back live.
+or irreversible — which is opendot's reason to exist. Ctrl+Z / the /undo
+command walk it back live.
 """
 
 from __future__ import annotations
@@ -22,422 +22,13 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Header, Input, Static
+from textual.widgets import Footer, Header, Input, Static
 
 from opendot.agent.loop import Agent
-
-
-# Pre-warm textual-image's terminal capability probe at import time — i.e. BEFORE
-# the Textual app puts the terminal in raw mode and focuses the input. The probe
-# sends a Device Attributes query ("\e[c") and reads the reply; if it runs later
-# (lazily during compose), that reply ("^[?1;2c") leaks into the focused input.
-# Guarded to a real TTY so it never hangs in tests / piped / one-shot mode.
-import sys as _sys
-try:
-    if _sys.stdin.isatty() and _sys.stdout.isatty():
-        from textual_image.widget import Image as _ProbeImage  # noqa: F401 - import triggers the probe
-except Exception:  # noqa: BLE001 - probe/import failure must never block startup
-    pass
-
-
-# Path to the logo image shown on the welcome screen (rendered via textual-image).
-from pathlib import Path as _Path
-_LOGO_PATH = _Path(__file__).resolve().parent.parent.parent / "assets" / "logo-full.png"
-
-
-def _row_bar(left: str, right: str, right_style: str = "dim", left_style: str = ""):
-    """A full-width row: left text, right text flush to the right edge.
-
-    Uses a grid so the right column auto-aligns to the widget's actual width at
-    render time (no manual padding / size measurement)."""
-    from rich.table import Table
-
-    grid = Table.grid(expand=True)
-    grid.add_column(justify="left", ratio=1)
-    grid.add_column(justify="right")
-    grid.add_row(Text(left, style=left_style), Text(right, style=right_style))
-    return grid
-
-
-def _title_bar(title: str, hint: str = "esc cancel"):
-    """A modal title row: bold title on the left, dim hint flush to the right."""
-    return _row_bar(title, hint, right_style="dim", left_style="bold")
-
-
-class ConfirmModal(ModalScreen[bool]):
-    """A blocking yes/no modal for irreversible commands. Returns True to run."""
-
-    CSS = """
-    ConfirmModal { align: center middle; }
-    #box { width: 70%; max-width: 90; height: auto; padding: 1 2;
-           border: round $warning; background: $surface; }
-    #q { margin-bottom: 1; }
-    #buttons { height: auto; align-horizontal: center; }
-    Button { margin: 0 1; }
-    """
-
-    def __init__(self, prompt: str) -> None:
-        super().__init__()
-        self._prompt = prompt
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="box"):
-            yield Static(Text.assemble(
-                ("⚠ irreversible action\n\n", "bold yellow"),
-                (self._prompt, ""),
-            ), id="q")
-            with Horizontal(id="buttons"):
-                yield Button("Run it", variant="error", id="yes")
-                yield Button("Skip", variant="primary", id="no")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        self.dismiss(event.button.id == "yes")
-
-    def on_key(self, event) -> None:
-        if event.key == "escape":
-            self.dismiss(False)
-
-
-class SearchListModal(ModalScreen[str | None]):
-    """A searchable, keyboard-navigable list picker (opencode-style).
-
-    ``items`` is a list of (value, label, group) tuples. Typing filters by
-    label; ↑/↓ move; Enter selects (returns the value); Esc cancels (None).
-    """
-
-    CSS = """
-    SearchListModal { align: center middle; }
-    #box { width: 70%; max-width: 90; height: 80%; padding: 1 2;
-           border: round $accent; background: $surface; }
-    #title { text-style: bold; margin-bottom: 1; }
-    #search { margin-bottom: 1; }
-    #list { height: 1fr; }
-    """
-
-    def __init__(self, title: str, items: list[tuple[str, str, str]]) -> None:
-        super().__init__()
-        self._title = title
-        self._items = items  # (value, label, group)
-
-    def compose(self) -> ComposeResult:
-        from textual.widgets import OptionList
-
-        with Vertical(id="box"):
-            yield Static(id="title")
-            yield Input(placeholder="Search…", id="search")
-            yield OptionList(id="list")
-
-    def on_mount(self) -> None:
-        self._set_title()
-        self._populate("")
-        self.query_one("#search", Input).focus()
-
-    def _set_title(self) -> None:
-        self.query_one("#title", Static).update(_title_bar(self._title, "esc cancel"))
-
-    def _populate(self, query: str) -> None:
-        from textual.widgets import OptionList
-        from textual.widgets.option_list import Option
-
-        q = query.lower()
-        ol = self.query_one("#list", OptionList)
-        ol.clear_options()
-        last_group = None
-        self._values: list[str] = []
-        for item in self._items:
-            value, label, group = item[0], item[1], item[2]
-            status = item[3] if len(item) > 3 else ""  # optional right-aligned status
-            if q and q not in label.lower():
-                continue
-            if group and group != last_group:
-                ol.add_option(Option(Text(group.upper(), style="bold magenta"), disabled=True))
-                last_group = group
-            # Status (e.g. "✓ enabled") is rendered flush-right via a grid.
-            prompt = _row_bar(label, status, "green") if status else Text(label)
-            ol.add_option(Option(prompt, id=str(len(self._values))))
-            self._values.append(value)
-        if self._values:
-            ol.highlighted = 1 if (self._items and self._items[0][2]) else 0
-
-    def on_input_changed(self, event: Input.Changed) -> None:
-        self._populate(event.value)
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        # Enter in the search box selects the current highlight.
-        from textual.widgets import OptionList
-
-        event.stop()  # don't let Enter bubble to the main chat input
-        ol = self.query_one("#list", OptionList)
-        if ol.highlighted is not None:
-            opt = ol.get_option_at_index(ol.highlighted)
-            if opt.id is not None:
-                self.dismiss(self._values[int(opt.id)])
-
-    def on_option_list_option_selected(self, event) -> None:
-        if event.option.id is not None:
-            self.dismiss(self._values[int(event.option.id)])
-
-    def on_key(self, event) -> None:
-        from textual.widgets import OptionList
-
-        if event.key == "escape":
-            self.dismiss(None)
-        elif event.key in ("down", "up"):
-            # Let the arrow keys drive the list while focus stays in the search box.
-            ol = self.query_one("#list", OptionList)
-            if event.key == "down":
-                ol.action_cursor_down()
-            else:
-                ol.action_cursor_up()
-            event.stop()
-
-
-class ApiKeyModal(ModalScreen[str | None]):
-    """A single password field to paste an API key. Returns the key, or None."""
-
-    CSS = """
-    ApiKeyModal { align: center middle; }
-    #box { width: 60%; max-width: 80; height: auto; padding: 1 2;
-           border: round $accent; background: $surface; }
-    #title { text-style: bold; }
-    #subtitle { color: $text-muted; text-style: italic; margin-bottom: 1; }
-    """
-
-    def __init__(self, provider: str, env_var: str) -> None:
-        super().__init__()
-        self._provider = provider
-        self._env_var = env_var
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="box"):
-            yield Static(_title_bar(f"Connect {self._provider}"), id="title")
-            yield Static(f"sets {self._env_var} for this session", id="subtitle")
-            yield Input(placeholder="Paste API key…", password=True, id="key")
-
-    def on_mount(self) -> None:
-        self.query_one("#key", Input).focus()
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        event.stop()  # don't let Enter bubble to the main chat input
-        self.dismiss(event.value.strip() or None)
-
-    def on_key(self, event) -> None:
-        if event.key == "escape":
-            self.dismiss(None)
-
-
-class McpAddModal(ModalScreen[dict | None]):
-    """Form to add an MCP server. Returns {"name", "spec"} or None.
-
-    One field decides the transport: a value starting with http(s):// is a
-    remote server (with an optional Authorization header); anything else is a
-    stdio launch command (split on spaces).
-    """
-
-    CSS = """
-    McpAddModal { align: center middle; }
-    #box { width: 70%; max-width: 90; height: auto; padding: 1 2;
-           border: round $accent; background: $surface; }
-    #title { text-style: bold; margin-bottom: 1; }
-    Input { margin-bottom: 1; }
-    #hint { color: $text-muted; text-style: italic; }
-    """
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="box"):
-            yield Static(_title_bar("Add an MCP server"), id="title")
-            yield Input(placeholder="name (e.g. github, supabase)", id="name")
-            yield Input(placeholder="https://…/mcp   OR   npx -y @scope/server args…", id="target")
-            yield Input(placeholder="Authorization header (remote only, optional)", id="header")
-            yield Static(
-                "enter submit · a value starting with http(s):// is treated as a remote URL",
-                id="hint",
-            )
-
-    def on_mount(self) -> None:
-        self.query_one("#name", Input).focus()
-
-    def _submit(self) -> None:
-        name = self.query_one("#name", Input).value.strip()
-        target = self.query_one("#target", Input).value.strip()
-        header = self.query_one("#header", Input).value.strip()
-        if not name or not target:
-            return  # name + target required; keep the form open
-        if target.lower().startswith(("http://", "https://")):
-            spec: dict = {"url": target}
-            if header:
-                k, _, v = header.partition("=") if "=" in header else header.partition(":")
-                spec["headers"] = {k.strip(): v.strip()}
-        else:
-            parts = target.split()
-            spec = {"command": parts[0]}
-            if len(parts) > 1:
-                spec["args"] = parts[1:]
-        self.dismiss({"name": name, "spec": spec})
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        event.stop()  # don't let Enter bubble to the main chat input
-        self._submit()
-
-    def on_key(self, event) -> None:
-        if event.key == "escape":
-            self.dismiss(None)
-
-
-# Slash commands shown in the autocomplete popup (name, one-line description).
-# Single source of truth — the popup filters this list.
-SLASH_COMMANDS: list[tuple[str, str]] = [
-    ("/model", "switch model (searchable picker)"),
-    ("/provider", "connect a provider + API key"),
-    ("/mcp", "manage MCP servers"),
-    ("/composio", "connect apps (Gmail, Slack, …)"),
-    ("/log", "show the action ledger"),
-    ("/undo", "revert the last action ( /undo <id> )"),
-    ("/clear", "reset the conversation"),
-    ("/compact", "trim old turns to free context"),
-    ("/help", "list commands"),
-]
-
-
-def _render_tool_result(tool: str, result: str):
-    """Render a tool's result. File edits (write_file/edit) show a colored diff;
-    other tools show a short preview. This is the 'see exactly what changed'
-    transparency that reinforces reversibility."""
-    result = result.rstrip()
-    if tool in {"write_file", "edit"} and "@@" in result:
-        t = Text()
-        for line in result.splitlines():
-            if line.startswith("+") and not line.startswith("+++"):
-                t.append(line + "\n", style="green")
-            elif line.startswith("-") and not line.startswith("---"):
-                t.append(line + "\n", style="red")
-            elif line.startswith("@@"):
-                t.append(line + "\n", style="cyan")
-            elif line.startswith(("+++", "---")):
-                t.append(line + "\n", style="dim")
-            else:
-                t.append(line + "\n", style="dim")
-        return t
-    # non-diff: first couple of lines, dimmed
-    lines = result.splitlines() or ["(done)"]
-    preview = "\n".join(lines[:3])
-    if len(lines) > 3:
-        preview += f"\n  … (+{len(lines) - 3} lines)"
-    return Text(preview, style="dim")
-
-
-def _context_window(model: str) -> int | None:
-    """Real context-window size from LiteLLM's model database (no guessing).
-
-    Returns None if LiteLLM doesn't know the model (e.g. some local models),
-    in which case the sidebar just omits the "% used" line.
-    """
-    try:
-        import litellm
-
-        info = litellm.get_model_info(model)
-        return info.get("max_input_tokens") or info.get("max_tokens")
-    except Exception:  # noqa: BLE001 - unknown model / lookup failure
-        return None
-
-
-class Sidebar(Static):
-    """Right rail (opencode-style): task title, Context meter, and the live
-    reversibility ledger — the section no other agent's sidebar has."""
-
-    def __init__(self, agent: Agent) -> None:
-        super().__init__(id="sidebar")
-        self.agent = agent
-        self.task_title = ""  # set from the user's latest message
-
-    def _section(self, t: Text, name: str) -> None:
-        t.append(f"{name}\n", style="bold")
-
-    def render(self):
-        a = self.agent
-        u = a.usage
-        t = Text()
-
-        # -- task title (like opencode's top line) --
-        title = self.task_title or "opendot session"
-        t.append(title + "\n\n", style="bold")
-
-        # -- Context --
-        self._section(t, "Context")
-        t.append(f"{u.total_tokens:,} tokens\n", style="dim")
-        window = _context_window(a.config.model)
-        if window:
-            pct = min(100, round(100 * u.total_tokens / window))
-            t.append(f"{pct}% used\n", style="dim")
-        t.append(f"${u.cost_usd:.4f} spent\n\n", style="dim")
-
-        # -- Model --
-        self._section(t, "Model")
-        t.append(f"{a.config.model}\n\n", style="cyan")
-
-        # -- MCP servers (only if any are configured/connected) --
-        mgr = getattr(a, "mcp", None)
-        if mgr is not None and (mgr.connected or mgr.errors):
-            self._section(t, "MCP")
-            for name in mgr.connected:
-                n_tools = sum(1 for mt in mgr.tools if mt.server == name)
-                t.append("• ", style="dim")
-                t.append(f"{name} ", style="green")
-                t.append(f"({n_tools} tools)\n", style="dim")
-            for name, err in mgr.errors.items():
-                t.append("• ", style="dim")
-                t.append(f"{name} failed\n", style="red")
-            t.append("\n")
-
-        # -- Providers (which API keys are set this session) --
-        try:
-            import os
-            from opendot.providers import CONNECTABLE_PROVIDERS
-            connected_providers = [n for n, var in CONNECTABLE_PROVIDERS if os.environ.get(var)]
-        except Exception:  # noqa: BLE001
-            connected_providers = []
-        if connected_providers:
-            self._section(t, "Providers")
-            for name in connected_providers:
-                t.append("• ", style="dim")
-                t.append(f"{name} ", style="green")
-                t.append("✓\n", style="green")
-            t.append("\n")
-
-        # -- Composio (show once a key is set; then list enabled apps) --
-        try:
-            from opendot import composio_tools
-            cx_configured = composio_tools.is_configured()
-            capps = composio_tools.enabled_apps()
-        except Exception:  # noqa: BLE001
-            cx_configured, capps = False, []
-        if cx_configured:
-            self._section(t, "Composio")
-            t.append("connected ", style="green")
-            t.append("✓\n", style="green")
-            for slug in capps:
-                t.append("• ", style="dim")
-                t.append(f"{slug}\n", style="green")
-            if not capps:
-                t.append("no apps enabled yet\n", style="dim")
-            t.append("\n")
-
-        # -- Ledger (the differentiator) --
-        self._section(t, "Ledger")
-        t.append("undoable ↺ · irreversible ✗\n", style="dim")
-        history = a.reversibility.history()
-        if not history:
-            t.append("no actions yet\n", style="dim")
-        else:
-            for e in history[-16:]:
-                mark, style = ("↺", "green") if e.reversible else ("✗", "red")
-                detail = e.detail.rsplit("/", 1)[-1][:20]
-                t.append("• ", style="dim")
-                t.append(f"{mark} ", style=style)
-                t.append(f"{e.kind[:5]} {detail}\n", style="dim")
-        t.append("\nctrl+z undo · ctrl+l log", style="dim italic")
-        return t
+from opendot.tui.commands import SLASH_COMMANDS
+from opendot.tui.helpers import _LOGO_PATH, _render_tool_result, _row_bar
+from opendot.tui.modals import ApiKeyModal, ConfirmModal, McpAddModal, SearchListModal
+from opendot.tui.sidebar import Sidebar
 
 
 class OpendotTUI(App):
@@ -861,30 +452,36 @@ class OpendotTUI(App):
             self._write(f"note: {var} is not set — use /provider to connect.", "sys")
 
     async def _pick_model(self) -> None:
+        import asyncio
+        from opendot import catalog
         from opendot.providers import list_models, provider_of
 
-        models = list_models()
-        if not models:
-            self._write("model list unavailable (litellm registry not found); "
-                        "use  /model <id>  to set one directly.", "sys")
-            return
-        # (value, label, group) sorted by provider then model for grouped display.
-        items = sorted(
-            ((m, m, provider_of(m)) for m in models),
-            key=lambda t: (t[2], t[1]),
-        )
+        # Prefer the models.dev catalog (curated names, grouped, text+tool only);
+        # fall back to LiteLLM's bundled registry offline / if it's empty.
+        entries = await asyncio.to_thread(catalog.list_models)
+        if entries:
+            items = [(e["model"], f"{e['name']}   {e['model']}", e["provider"]) for e in entries]
+        else:
+            models = list_models()
+            if not models:
+                self._write("model list unavailable; use  /model <id>  to set one directly.", "sys")
+                return
+            items = sorted(((m, m, provider_of(m)) for m in models), key=lambda t: (t[2], t[1]))
         chosen = await self.push_screen_wait(SearchListModal("Select model", items))
         if chosen:
             self._set_model(chosen)
 
     async def _connect_provider(self) -> None:
-        from opendot.providers import CONNECTABLE_PROVIDERS, register_key
+        import asyncio
+        from opendot.providers import connectable_providers, register_key
 
-        items = [(var, name, "Providers") for name, var in CONNECTABLE_PROVIDERS]
+        # models.dev list when reachable, hardcoded fallback otherwise.
+        pairs = await asyncio.to_thread(connectable_providers)
+        items = [(var, name, "Providers") for name, var in pairs]
         var = await self.push_screen_wait(SearchListModal("Connect a provider", items))
         if not var:
             return
-        name = next((n for n, v in CONNECTABLE_PROVIDERS if v == var), var)
+        name = next((n for n, v in pairs if v == var), var)
         key = await self.push_screen_wait(ApiKeyModal(name, var))
         if not key:
             return

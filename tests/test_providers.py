@@ -6,6 +6,8 @@ connect flow) and that model discovery reads from LiteLLM's registry.
 
 import os
 
+import pytest
+
 from opendot import providers as p
 
 
@@ -15,46 +17,58 @@ def _clear_keys(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
-def test_model_for_available_key_picks_the_set_provider(monkeypatch):
+@pytest.fixture
+def fake_catalog(monkeypatch):
+    """Make default_model_for_env deterministic: <provider>/default for the env
+    var's provider, so model_for_available_key tests don't depend on the live
+    LiteLLM registry."""
+    from opendot import catalog
+    mapping = {
+        "OPENAI_API_KEY": "gpt-x",
+        "DEEPSEEK_API_KEY": "deepseek/deepseek-x",
+        "HF_TOKEN": "huggingface/some/model",
+    }
+    monkeypatch.setattr(catalog, "default_model_for_env", lambda env: mapping.get(env))
+    monkeypatch.setattr(catalog, "list_providers", lambda: [])  # so known_key_vars falls back
+
+
+def test_model_for_available_key_picks_the_set_provider(monkeypatch, fake_catalog):
     _clear_keys(monkeypatch)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
-    assert p.model_for_available_key() == "deepseek/deepseek-chat"
+    assert p.model_for_available_key() == "deepseek/deepseek-x"
 
 
-def test_model_for_available_key_none_when_no_keys(monkeypatch):
+def test_model_for_available_key_none_when_no_keys(monkeypatch, fake_catalog):
     _clear_keys(monkeypatch)
     assert p.model_for_available_key() is None
 
 
-def test_model_for_available_key_prefers_openai(monkeypatch):
+def test_model_for_available_key_prefers_openai(monkeypatch, fake_catalog):
     _clear_keys(monkeypatch)
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-d")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-o")
-    assert p.model_for_available_key() == "gpt-5.1"
+    assert p.model_for_available_key() == "gpt-x"  # openai first in _AUTO_ORDER
 
 
-def test_model_for_available_key_handles_huggingface(monkeypatch):
+def test_model_for_available_key_handles_huggingface(monkeypatch, fake_catalog):
     _clear_keys(monkeypatch)
-    monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("HF_TOKEN", "hf_x")
     model = p.model_for_available_key()
     assert model is not None and model.startswith("huggingface/")
 
 
-def test_every_connectable_provider_has_an_auto_default():
-    """Every provider you can connect via /provider must map to a default model,
-    else setting only that key would leave opendot stuck on gpt-5.1."""
-    auto_vars = {var for var, _ in p._ENV_DEFAULT_MODEL}
-    for _name, var in p.CONNECTABLE_PROVIDERS:
-        assert var in auto_vars, f"{var} has no auto-switch default model"
-
-
 def test_env_var_for_known_providers():
-    assert p.env_var_for("gpt-5.1") == "OPENAI_API_KEY"
+    # Resolved live via litellm.get_llm_provider — covers bare + prefixed forms.
+    assert p.env_var_for("gpt-4o") == "OPENAI_API_KEY"
     assert p.env_var_for("claude-opus-4-5") == "ANTHROPIC_API_KEY"
     assert p.env_var_for("deepseek/deepseek-chat") == "DEEPSEEK_API_KEY"
-    assert p.env_var_for("gemini/gemini-3-pro") == "GEMINI_API_KEY"
-    assert p.env_var_for("huggingface/together/x") == "HF_TOKEN"
+    assert p.env_var_for("gemini/gemini-1.5-pro") == "GEMINI_API_KEY"
+
+
+def test_env_var_for_gpt_via_other_providers():
+    # GPT through a non-OpenAI provider resolves to that provider's key.
+    assert p.env_var_for("azure/gpt-4o") == "AZURE_API_KEY"
+    assert p.env_var_for("openrouter/openai/gpt-4o") == "OPENROUTER_API_KEY"
 
 
 def test_env_var_for_keyless_local_models():

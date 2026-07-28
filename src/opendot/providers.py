@@ -1,84 +1,133 @@
-"""Provider ↔ API-key mapping and model discovery.
+"""Provider ↔ API-key mapping and auto model selection.
 
-opendot stays model-agnostic: it never ships its own model list. This module is
-the one place that (a) maps a model string to the env var LiteLLM expects for
-it, and (b) discovers available models from LiteLLM's own registry so the TUI's
-`/model` picker shows real, current models without a hardcoded table.
+Model/provider *lists* come from LiteLLM (see ``opendot/catalog.py``). This
+module holds only the prefix → API-key-env-var mapping, which LiteLLM doesn't
+expose directly. It's small and changes rarely.
 """
 
 from __future__ import annotations
 
 import os
 
-# Ordered so more specific prefixes win. Maps a model-string prefix to the env
-# var LiteLLM reads the key from. Used for the missing-key hint and the
-# `/provider` connect flow — never to restrict which models can be used.
-PROVIDER_KEYS: dict[str, str] = {
-    "anthropic/": "ANTHROPIC_API_KEY",
-    "claude": "ANTHROPIC_API_KEY",       # bare `claude-...` routes to Anthropic
-    "gemini/": "GEMINI_API_KEY",
-    "deepseek/": "DEEPSEEK_API_KEY",
-    "groq/": "GROQ_API_KEY",
-    "mistral/": "MISTRAL_API_KEY",
-    "huggingface/": "HF_TOKEN",
-    "openai/": "OPENAI_API_KEY",
-    "gpt-": "OPENAI_API_KEY",            # bare `gpt-...` routes to OpenAI
-    "o1": "OPENAI_API_KEY",
-    "o3": "OPENAI_API_KEY",
+# Providers whose key env var does NOT follow the ``<PROVIDER>_API_KEY``
+# convention. LiteLLM buries these inside each provider's validate_environment,
+# so this small override table is the one thing we hold; every other provider
+# (including GPT-via-Azure, OpenRouter, etc.) is derived from the convention.
+_ENV_OVERRIDES: dict[str, str] = {
+    "huggingface": "HF_TOKEN",
+    "gemini": "GEMINI_API_KEY",     # provider id is 'gemini', not 'google'
+    "vertex_ai": "GOOGLE_APPLICATION_CREDENTIALS",
+    "bedrock": "AWS_ACCESS_KEY_ID",
+    "azure": "AZURE_API_KEY",
 }
 
-# Models that run locally / need no key — never warn or prompt for these.
-NO_KEY_PREFIXES = ("ollama/", "ollama_chat/", "lm_studio/")
-
-# The providers offered in the `/provider` connect flow: (display name, env var).
-# One entry per distinct key; deduped from PROVIDER_KEYS in a stable order.
-CONNECTABLE_PROVIDERS: list[tuple[str, str]] = [
-    ("OpenAI", "OPENAI_API_KEY"),
-    ("Anthropic", "ANTHROPIC_API_KEY"),
-    ("Google (Gemini)", "GEMINI_API_KEY"),
-    ("DeepSeek", "DEEPSEEK_API_KEY"),
-    ("Groq", "GROQ_API_KEY"),
-    ("Mistral", "MISTRAL_API_KEY"),
-    ("Hugging Face", "HF_TOKEN"),
-]
+# Local providers that need no API key. LiteLLM lists these in provider_list
+# but doesn't flag "keyless", so we name them. Matches LiteLLM's local set.
+_KEYLESS_PROVIDERS = {"ollama", "ollama_chat", "vllm", "hosted_vllm",
+                      "lm_studio", "llamafile"}
+# Model-string prefixes for those providers (derived — keep in one place).
+NO_KEY_PREFIXES = tuple(f"{p}/" for p in sorted(_KEYLESS_PROVIDERS))
 
 
-# A sensible default model per provider env var, used to auto-pick a working
-# model when the configured default's key is missing but this one's key is set.
-# Ordered by preference when several keys are present.
-# One entry per CONNECTABLE_PROVIDERS env var, so a key for ANY offered
-# provider auto-selects a working model (keep these two lists in sync).
-_ENV_DEFAULT_MODEL: list[tuple[str, str]] = [
-    ("OPENAI_API_KEY", "gpt-5.1"),
-    ("ANTHROPIC_API_KEY", "claude-opus-4-5"),
-    ("GEMINI_API_KEY", "gemini/gemini-3-pro"),
-    ("DEEPSEEK_API_KEY", "deepseek/deepseek-chat"),
-    ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile"),
-    ("MISTRAL_API_KEY", "mistral/mistral-large-latest"),
-    ("HF_TOKEN", "huggingface/meta-llama/Llama-3.3-70B-Instruct"),
-]
+def connectable_providers() -> list[tuple[str, str]]:
+    """(display name, env var) pairs for the `/provider` flow — the LiteLLM-
+    routable providers that have text models, from the catalog."""
+    from opendot import catalog
+    return [(p["name"], p["env"]) for p in catalog.list_providers()]
 
 
-def env_var_for(model: str) -> str | None:
-    """The API-key env var LiteLLM expects for ``model``, or None if unknown /
-    keyless (local models)."""
-    low = model.lower()
-    if low.startswith(NO_KEY_PREFIXES):
+def known_key_vars() -> list[str]:
+    """API-key env vars for the providers opendot surfaces — used to show which
+    keys are set (sidebar) and to order auto model selection. Derived from the
+    catalog's connectable providers, falling back to the override set."""
+    try:
+        from opendot import catalog
+        vars_ = [p["env"] for p in catalog.list_providers()]
+        if vars_:
+            return vars_
+    except Exception:  # noqa: BLE001
+        pass
+    return list(dict.fromkeys(_ENV_OVERRIDES.values()))
+
+
+def _env_for_provider_id(provider: str) -> str | None:
+    """Map a LiteLLM provider id to its API-key env var. Uses the override table
+    for the exceptions, else the ``<PROVIDER>_API_KEY`` convention."""
+    if not provider or provider in _KEYLESS_PROVIDERS:
         return None
-    for prefix, var in PROVIDER_KEYS.items():
+    if provider in _ENV_OVERRIDES:
+        return _ENV_OVERRIDES[provider]
+    return f"{provider.upper()}_API_KEY"
+
+
+# Bare-model routing: LiteLLM sends these prefixes to a canonical provider.
+# Used only when a bare model id isn't found in the registry.
+_BARE_ROUTING = {"gpt-": "openai", "o1": "openai", "o3": "openai",
+                 "claude": "anthropic"}
+
+
+def _provider_id_for(model: str) -> str | None:
+    """The LiteLLM provider id for a model string — a PURE lookup (no side
+    effects). ``provider/model`` → the prefix; a bare id → the registry's
+    ``litellm_provider``; else the canonical bare-routing rules.
+
+    Deliberately does NOT call ``litellm.get_llm_provider`` — that can trigger
+    interactive auth for some providers (e.g. ChatGPT/Codex) and hang."""
+    low = model.lower()
+    if "/" in low:
+        return low.split("/", 1)[0]
+    try:
+        meta = _model_registry().get(model) or _model_registry().get(low)
+        if meta and meta.get("litellm_provider"):
+            return meta["litellm_provider"].lower()
+    except Exception:  # noqa: BLE001
+        pass
+    for prefix in sorted(_BARE_ROUTING, key=len, reverse=True):
         if low.startswith(prefix):
-            return var
+            return _BARE_ROUTING[prefix]
     return None
 
 
+def _model_registry() -> dict:
+    try:
+        import litellm
+        return litellm.model_cost
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def env_var_for(model: str) -> str | None:
+    """The API-key env var LiteLLM expects for ``model``, or None if keyless /
+    unknown.
+
+    Works for any form (bare ``gpt-4o``, ``azure/gpt-4o``,
+    ``openrouter/openai/gpt-4o``, ``deepseek/deepseek-chat``). The env var is the
+    ``<PROVIDER>_API_KEY`` convention plus a small override table."""
+    if model.lower().startswith(NO_KEY_PREFIXES):
+        return None
+    return _env_for_provider_id(_provider_id_for(model) or "")
+
+
+# Preference order for auto-selecting a model when several provider keys are set.
+_AUTO_ORDER = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+               "DEEPSEEK_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY",
+               "XAI_API_KEY", "COHERE_API_KEY", "OPENROUTER_API_KEY", "HF_TOKEN"]
+
+
 def model_for_available_key() -> str | None:
-    """If some provider's API key is set in the environment, return a sensible
-    default model for it (first match by preference order). None if no known key
-    is set. Used to auto-switch when the configured model's key is missing."""
-    import os
-    for var, model in _ENV_DEFAULT_MODEL:
+    """If some provider's API key is set, return a working model for it (a real
+    model from LiteLLM's registry for that provider). None if no known key is
+    set. Used to auto-switch when the configured model's key is missing.
+
+    Env vars are tried in _AUTO_ORDER, then any other key we know about."""
+    from opendot import catalog
+
+    others = [v for v in known_key_vars() if v not in _AUTO_ORDER]
+    for var in _AUTO_ORDER + others:
         if os.environ.get(var):
-            return model
+            model = catalog.default_model_for_env(var)
+            if model:
+                return model
     return None
 
 
@@ -95,16 +144,14 @@ def provider_of(model: str) -> str:
 
 
 def list_models() -> list[str]:
-    """Real model strings from LiteLLM's registry (``litellm.model_cost``).
+    """Real model strings from LiteLLM's registry (text chat models only).
 
     Returns them sorted; empty list if LiteLLM isn't importable. This is the
-    source for the `/model` picker — no hardcoded list, updates with LiteLLM.
+    fallback source for the `/model` picker.
     """
     try:
-        import litellm
-
-        names = [m for m in litellm.model_cost.keys() if m and m != "sample_spec"]
-        return sorted(set(names))
+        from opendot import catalog
+        return sorted({m["model"] for m in catalog.list_models()})
     except Exception:  # noqa: BLE001 - registry unavailable
         return []
 
