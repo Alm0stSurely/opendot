@@ -1,13 +1,8 @@
 <div align="center">
 
-```
-                          _       _
-  ___  _ __   ___ _ __   __| | ___ | |_
- / _ \| '_ \ / _ \ '_ \ / _` |/ _ \| __|
-| (_) | |_) |  __/ | | | (_| | (_) | |_
- \___/| .__/ \___|_| |_|\__,_|\___/ \__|
-      |_|
-```
+<!-- Absolute raw-GitHub URL so the logo also renders on PyPI (which can't
+     resolve relative repo paths). File: assets/logo-full.png -->
+<img src="https://raw.githubusercontent.com/vedaant00/opendot/main/assets/logo-full.png" alt="opendot" width="360" />
 
 **An interactive terminal AI agent you can fully undo.**
 
