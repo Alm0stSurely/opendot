@@ -18,8 +18,8 @@ Design mirrors how Plandot uses Composio, adapted for a local terminal app:
   reaches an external service, so — exactly like MCP tools — opendot treats it
   as **irreversible**: confirmed before running and marked ✗ in the ledger.
 
-The composio SDK is an optional dependency (``pip install 'opendot[composio]'``);
-everything here fails soft if it isn't installed.
+The composio SDK is a core dependency, but everything here still fails soft if
+the import is unavailable, so a broken install never crashes opendot.
 """
 
 from __future__ import annotations

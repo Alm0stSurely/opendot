@@ -125,11 +125,7 @@ ledger. Your built-in file/shell actions stay snapshotted and undoable as usual.
 
 Beyond MCP, opendot can connect to [Composio](https://composio.dev)'s 3000+ app
 tools (Gmail, Slack, GitHub, Notion, Linear, …) using **your own** Composio API
-key. Install the extra and use `/composio` in the chat:
-
-```bash
-pip install 'opendot[composio]'
-```
+key. Just use `/composio` in the chat:
 
 - The first `/composio` asks for your Composio API key (stored in
   `~/.opendot/composio.json`, owner-readable only).
