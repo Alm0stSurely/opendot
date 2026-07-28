@@ -70,10 +70,11 @@ local, or Hugging Face. Set the provider's API key in your environment and pass
 
 | Provider | Env var | Example `--model` |
 |----------|---------|-------------------|
-| OpenAI | `OPENAI_API_KEY` | `gpt-4o` |
-| Anthropic | `ANTHROPIC_API_KEY` | `claude-sonnet-4-5` |
-| Google | `GEMINI_API_KEY` | `gemini/gemini-2.0-flash` |
-| Ollama (local) | — | `ollama/qwen2.5` |
+| OpenAI | `OPENAI_API_KEY` | `gpt-5.1` |
+| Anthropic | `ANTHROPIC_API_KEY` | `claude-opus-4-5` |
+| Google | `GEMINI_API_KEY` | `gemini/gemini-3-pro` |
+| Hugging Face | `HF_TOKEN` | `huggingface/together/deepseek-ai/DeepSeek-R1` |
+| Ollama (local) | — | `ollama/qwen3` |
 
 Reasoning models stream their thinking live.
 
