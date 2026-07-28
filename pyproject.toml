@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "opendot"
-version = "0.0.5"
+version = "0.0.6"
 description = "An interactive terminal AI agent you can fully undo — any model, acts on your real files, every action reversible."
 readme = "README.md"
 license = "MIT"
@@ -46,3 +46,8 @@ packages = ["src/opendot"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"   # pytest-asyncio runs `async def test_*` without per-test markers
+filterwarnings = [
+    # Emitted inside textual-image (calls Pillow's deprecated Image.getdata),
+    # not our code — filter so our own warnings stay visible.
+    "ignore:Image.Image.getdata is deprecated:DeprecationWarning",
+]
