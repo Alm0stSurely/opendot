@@ -937,7 +937,8 @@ class OpendotTUI(App):
         from opendot import composio_tools as cx
 
         if not cx.composio_available():
-            self._write("Composio isn't installed. Run:  pip install 'opendot[composio]'", "sys")
+            # composio is a core dep, so this only trips on a broken install.
+            self._write("Composio isn't available — try reinstalling opendot.", "sys")
             return
 
         # First run (or no key yet): ask for the Composio API key.
