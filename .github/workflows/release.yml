@@ -18,6 +18,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Check tag matches package version
+        run: |
+          # Tag is like refs/tags/v0.0.2 -> strip to 0.0.2
+          TAG="${GITHUB_REF_NAME#v}"
+          # Read version from pyproject.toml (grep the [project] version line)
+          PKG=$(grep -E '^\s*version\s*=' pyproject.toml | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          echo "tag=$TAG  pyproject version=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag v$TAG does not match pyproject.toml version $PKG."
+            echo "::error::Bump 'version' in pyproject.toml (and src/opendot/__init__.py) to $TAG, commit, then re-tag."
+            exit 1
+          fi
       - name: Build sdist + wheel
         run: |
           python -m pip install --upgrade pip build
