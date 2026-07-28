@@ -1,18 +1,28 @@
-<div align="center">
+<!-- Absolute raw-GitHub URLs so the logo/screenshot also render on PyPI, which
+     can't resolve relative repo paths. When a dark-mode logo exists, add a
+     <source ... media="(prefers-color-scheme: dark)"> line to the <picture>. -->
+<p align="center">
+  <a href="https://pypi.org/project/opendot/">
+    <img src="https://raw.githubusercontent.com/vedaant00/opendot/main/assets/logo-full.png" alt="opendot" width="360" />
+  </a>
+  <br />
+  An interactive terminal AI agent you can fully undo.
+</p>
 
-<!-- Absolute raw-GitHub URL so the logo also renders on PyPI (which can't
-     resolve relative repo paths). File: assets/logo-full.png -->
-<img src="https://raw.githubusercontent.com/vedaant00/opendot/main/assets/logo-full.png" alt="opendot" width="360" />
+<p align="center">
+  <a href="https://github.com/vedaant00/opendot/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/vedaant00/opendot/ci.yml?style=flat-square&branch=main&label=ci" /></a>
+  <a href="https://pypi.org/project/opendot/"><img alt="PyPI" src="https://img.shields.io/pypi/v/opendot?style=flat-square" /></a>
+  <a href="https://pypi.org/project/opendot/"><img alt="Python versions" src="https://img.shields.io/pypi/pyversions/opendot?style=flat-square" /></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" /></a>
+</p>
 
-**An interactive terminal AI agent you can fully undo.**
+<!-- Demo: replace with a real terminal recording/screenshot of a task + undo.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/vedaant00/opendot/main/assets/demo.gif" alt="opendot demo" width="720" />
+</p>
+-->
 
-[![CI](https://github.com/vedaant00/opendot/actions/workflows/ci.yml/badge.svg)](https://github.com/vedaant00/opendot/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/opendot.svg)](https://pypi.org/project/opendot/)
-[![Downloads](https://static.pepy.tech/badge/opendot)](https://pepy.tech/project/opendot)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
-</div>
-
+---
 
 opendot works directly on your real files and shell — but unlike other terminal
 agents, **every action it takes is snapshotted first**, so you can see exactly
@@ -123,10 +133,23 @@ Honest boundary: opendot cannot undo effects that leave your machine (a sent
 email, a dropped remote database, a `git push`). It tells you *before* running
 those, rather than pretending otherwise.
 
+## Contributing
+
+Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup and
+the one hard rule (don't break reversibility). Security reports go through
+[SECURITY.md](SECURITY.md).
+
+```bash
+git clone https://github.com/vedaant00/opendot
+cd opendot
+uv pip install -e ".[dev]"   # or: pip install -e ".[dev]"
+pytest
+```
+
 ## Status
 
 Early (alpha). The interactive agent, local tools, and the full reversibility
 engine work and are tested. Streaming, slash-commands, and `OPENDOT.md` rules
 are in. A richer TUI and more tools are coming.
 
-MIT licensed.
+[MIT licensed.](LICENSE)
