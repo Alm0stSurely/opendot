@@ -46,11 +46,41 @@ def _title_bar(title: str, hint: str = "esc cancel"):
     return _row_bar(title, hint, right_style="dim", left_style="bold")
 
 
+def _render_composio_result(result: str):
+    """Compact one-line status for a Composio tool result, instead of dumping
+    the raw JSON. Falls back to None if we can't parse it (caller shows the
+    generic preview)."""
+    import json
+
+    try:
+        data = json.loads(result)
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(data, dict):
+        return None
+    # Execute result: {"total_count", "success_count", "error_count", ...}
+    if "success_count" in data or "total_count" in data:
+        ok = int(data.get("success_count", 0))
+        total = int(data.get("total_count", ok))
+        style = "green" if ok and ok == total else ("yellow" if ok else "red")
+        return Text(f"✓ executed · {ok}/{total} ok", style=style)
+    # Search result: {"results": [ ... ]}
+    if isinstance(data.get("results"), list):
+        n = len(data["results"])
+        return Text(f"found {n} tool{'s' if n != 1 else ''}", style="dim")
+    return None
+
+
 def _render_tool_result(tool: str, result: str):
     """Render a tool's result. File edits (write_file/edit) show a colored diff;
-    other tools show a short preview. This is the 'see exactly what changed'
-    transparency that reinforces reversibility."""
+    Composio results show a compact status; other tools show a short preview.
+    This is the 'see exactly what changed' transparency that reinforces
+    reversibility."""
     result = result.rstrip()
+    if tool.startswith("composio__"):
+        compact = _render_composio_result(result)
+        if compact is not None:
+            return compact
     if tool in {"write_file", "edit"} and "@@" in result:
         t = Text()
         for line in result.splitlines():
@@ -65,11 +95,17 @@ def _render_tool_result(tool: str, result: str):
             else:
                 t.append(line + "\n", style="dim")
         return t
-    # non-diff: first couple of lines, dimmed
+    # non-diff: a short preview, dimmed. Cap BOTH lines and total length —
+    # tool results (e.g. Composio search) are often one huge single-line JSON
+    # blob, which line-only truncation wouldn't shorten.
     lines = result.splitlines() or ["(done)"]
     preview = "\n".join(lines[:3])
-    if len(lines) > 3:
-        preview += f"\n  … (+{len(lines) - 3} lines)"
+    extra_lines = len(lines) - 3
+    _MAX = 500
+    if len(preview) > _MAX:
+        preview = preview[:_MAX].rstrip() + " …"
+    elif extra_lines > 0:
+        preview += f"\n  … (+{extra_lines} more lines)"
     return Text(preview, style="dim")
 
 

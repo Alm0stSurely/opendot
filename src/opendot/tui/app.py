@@ -38,7 +38,7 @@ class OpendotTUI(App):
     Screen { layout: vertical; layers: base overlay; }
     #body { height: 1fr; }                     /* main column + sidebar fill the middle */
     #main { width: 3fr; height: 1fr; }         /* left column: transcript + input + mode */
-    #transcript { height: 1fr; padding: 0 1; } /* fills the space above the input */
+    #transcript { height: 1fr; padding: 0 1 1 1; } /* pad bottom so the last message isn't glued to the input */
     #sidebar { width: 34; height: 1fr; padding: 1; border-left: solid $panel; }
 
     /* Welcome layout: small centered logo with the input right below it,
@@ -432,7 +432,10 @@ class OpendotTUI(App):
         elif cmd == "composio":
             self.run_worker(self._manage_composio(), exclusive=False)
         elif cmd == "log":
-            self.action_log()
+            if rest.strip().lower() == "clear":
+                self.run_worker(self._clear_log(), exclusive=False)
+            else:
+                self.action_log()
         elif cmd == "undo":
             self._do_undo(rest.strip() or None)
         else:
@@ -697,6 +700,23 @@ class OpendotTUI(App):
             mark = "↺" if e.reversible else "✗ irreversible"
             t.append(f"  {e.id}  {mark}  {e.kind}  {e.detail}\n", style="dim")
         self._write(t, "")
+
+    async def _clear_log(self) -> None:
+        """`/log clear` — wipe this project's action ledger after confirming
+        (it discards the undo history, so gate it behind the confirm modal)."""
+        rev = self.agent.reversibility
+        if not rev.history():
+            self._write("no actions to clear", "sys")
+            return
+        ok = await self.push_screen_wait(ConfirmModal(
+            "Clear the action ledger for this project?\n"
+            "This discards the undo history — past actions can no longer be undone."
+        ))
+        if not ok:
+            return
+        n = rev.clear_history()
+        self._write(f"cleared {n} ledger entr{'y' if n == 1 else 'ies'}.", "sys")
+        self._refresh_sidebar()
 
 
 def run_tui(agent: Agent) -> None:

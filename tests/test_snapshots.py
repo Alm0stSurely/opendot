@@ -172,3 +172,20 @@ def test_load_snapshot_roundtrip(tmp_path):
     loaded = S.load_snapshot(s.project_id, s.id)
     assert loaded.files == s.files
     assert loaded.workdir == s.workdir
+
+
+def test_ledger_clear_wipes_history(tmp_path):
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+    rev.before_action("write", "a.txt", reversible=True)
+    rev.before_action("shell", "git init", reversible=False)
+    assert len(rev.history()) == 2
+
+    removed = rev.clear_history()
+    assert removed == 2
+    assert rev.history() == []
+    # clearing an already-empty ledger is a no-op, not an error
+    assert rev.clear_history() == 0

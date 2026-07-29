@@ -115,12 +115,17 @@ def _build_agent(model: str, workdir: str, confirm=None) -> Agent:
     )
 
 
-def _cmd_log(workdir: str) -> None:
-    """`opendot log` — show the auditable action history."""
+def _cmd_log(workdir: str, clear: bool = False) -> None:
+    """`opendot log` — show the auditable action history (or --clear it)."""
     from opendot.reversibility.engine import Reversibility
     from opendot.reversibility.rules import load_rules
 
     rev = Reversibility(workdir=workdir, rules=load_rules(workdir))
+    if clear:
+        n = rev.clear_history()
+        console.print(f"[green]cleared[/green] {n} ledger entr{'y' if n == 1 else 'ies'} "
+                      "(undo history discarded)")
+        return
     entries = rev.history()
     if not entries:
         console.print("[dim]no actions recorded yet[/dim]")
@@ -357,7 +362,9 @@ def main() -> None:
     parser.add_argument("--version", action="version", version=f"opendot {__version__}")
 
     sub = parser.add_subparsers(dest="command")
-    sub.add_parser("log", help="Show the auditable history of actions opendot took.")
+    p_log = sub.add_parser("log", help="Show the auditable history of actions opendot took.")
+    p_log.add_argument("--clear", action="store_true",
+                       help="Wipe this project's action ledger (discards undo history).")
     p_undo = sub.add_parser("undo", help="Restore the workspace (last action, or to a given id).")
     p_undo.add_argument("id", nargs="?", help="Action id from `opendot log` (default: last).")
 
@@ -388,7 +395,7 @@ def main() -> None:
 
     # Reversibility subcommands (no model call needed).
     if args.command == "log":
-        _cmd_log(workdir)
+        _cmd_log(workdir, clear=getattr(args, "clear", False))
         return
     if args.command == "undo":
         _cmd_undo(workdir, args.id)

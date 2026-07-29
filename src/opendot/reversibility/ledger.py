@@ -60,3 +60,14 @@ def read_all(project_id: str) -> list[LedgerEntry]:
 def last(project_id: str) -> LedgerEntry | None:
     entries = read_all(project_id)
     return entries[-1] if entries else None
+
+
+def clear(project_id: str) -> int:
+    """Delete this project's ledger file. Returns how many entries were removed.
+    Note: this discards the undo history; snapshot objects on disk are left
+    (harmless, content-addressed) but are no longer referenced by any entry."""
+    path = _ledger_path(project_id)
+    n = len(read_all(project_id))
+    if path.exists():
+        path.unlink()
+    return n
