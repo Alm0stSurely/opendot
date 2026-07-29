@@ -106,12 +106,30 @@ def _read_object(h: str) -> bytes:
 # Snapshot / restore
 # ---------------------------------------------------------------------------
 
+# Files larger than this are NOT snapshotted (skipped), so a giant file can't
+# make every snapshot slow and bloat the store. An action touching such a file
+# is therefore not fully undoable — take_snapshot reports the skipped paths so
+# the caller can say so.
+_MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB
+
+
+@dataclass
+class FileEntry:
+    """One captured file: content hash, POSIX mode bits, and (mtime, size) so a
+    later snapshot can skip re-hashing an unchanged file."""
+    h: str
+    mode: int | None = None   # st_mode & 0o777, or None if unknown (old snapshots)
+    mtime: float | None = None
+    size: int | None = None
+
+
 @dataclass
 class Snapshot:
     id: str
     project_id: str
     workdir: str
-    files: dict[str, str]  # relative posix path -> content hash
+    files: dict[str, FileEntry]  # relative posix path -> FileEntry
+    skipped_large: list[str] = field(default_factory=list)  # paths too big to capture
 
 
 def _iter_files(workdir: Path, rules: IgnoreRules):
@@ -129,24 +147,142 @@ def _iter_files(workdir: Path, rules: IgnoreRules):
 
 
 def take_snapshot(workdir: str | Path, rules: IgnoreRules | None = None) -> Snapshot:
-    """Capture the workspace state. Cheap when little changed (content-addressed)."""
+    """Capture the workspace state. Cheap when little changed (content-addressed).
+
+    Files over ``_MAX_FILE_BYTES`` are skipped (recorded in ``skipped_large``) so
+    one huge file can't make snapshots slow/bloated — those are not undoable.
+    """
     rules = rules or IgnoreRules()
     wd = Path(workdir).resolve()
     pid = project_id_for(wd)
-    files: dict[str, str] = {}
+
+    # Previous snapshot's entries, keyed by path — used to skip re-hashing files
+    # whose (mtime, size) are unchanged. This is what makes snapshots of large,
+    # mostly-static workspaces near-instant.
+    prev = _latest_snapshot_files(pid)
+
+    files: dict[str, FileEntry] = {}
+    skipped_large: list[str] = []
     for f in _iter_files(wd, rules):
+        rel = f.relative_to(wd).as_posix()
+        try:
+            st = f.stat()
+        except OSError:
+            continue
+        mode = st.st_mode & 0o777
+        # Fast path: unchanged since the last snapshot → reuse its hash, no read.
+        old = prev.get(rel)
+        if (old is not None and old.mtime == st.st_mtime and old.size == st.st_size
+                and old.h):
+            files[rel] = FileEntry(h=old.h, mode=mode, mtime=st.st_mtime, size=st.st_size)
+            continue
+        if st.st_size > _MAX_FILE_BYTES:
+            skipped_large.append(rel)
+            continue
         try:
             data = f.read_bytes()
         except OSError:
             continue  # unreadable file: skip rather than fail the whole snapshot
         h = _write_object(data)
-        rel = f.relative_to(wd).as_posix()
-        files[rel] = h
+        files[rel] = FileEntry(h=h, mode=mode, mtime=st.st_mtime, size=st.st_size)
 
     snap_id = _next_snapshot_id(pid)
-    snap = Snapshot(id=snap_id, project_id=pid, workdir=str(wd), files=files)
+    snap = Snapshot(id=snap_id, project_id=pid, workdir=str(wd),
+                    files=files, skipped_large=skipped_large)
     _write_manifest(snap)
+
+    # Bound disk growth: drop this project's oldest snapshots beyond the
+    # retention limit, then delete any objects no longer referenced anywhere.
+    if prune_project_snapshots(pid):
+        gc_objects()
     return snap
+
+
+def _latest_snapshot_files(project_id: str) -> dict[str, FileEntry]:
+    """The file map of the most recent snapshot for this project, for the
+    unchanged-file fast path. Empty if none / unreadable."""
+    ids = list_snapshots(project_id)
+    if not ids:
+        return {}
+    try:
+        return load_snapshot(project_id, ids[-1]).files
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+# How many snapshots to keep per project before older ones are pruned. Bounds
+# disk growth on long, edit-heavy sessions. Content is deduped across snapshots,
+# so this is generous.
+MAX_SNAPSHOTS_PER_PROJECT = 50
+
+
+def _referenced_hashes() -> set[str]:
+    """Every content hash referenced by ANY surviving snapshot, across ALL
+    projects. Objects are shared globally (deduped), so GC must consider every
+    project's manifests before deleting an object."""
+    refs: set[str] = set()
+    snaps_root = store_root() / "snapshots"
+    if not snaps_root.exists():
+        return refs
+    for proj_dir in snaps_root.iterdir():
+        if not proj_dir.is_dir():
+            continue
+        for manifest in proj_dir.glob("*.json"):
+            try:
+                d = json.loads(manifest.read_text(encoding="utf-8"))
+            except Exception:  # noqa: BLE001
+                # Unreadable manifest → be conservative, keep its objects by
+                # skipping (we simply can't enumerate them, so we won't GC them
+                # blindly — but we also can't add refs; safest is to abort GC).
+                raise
+            for v in d.get("files", {}).values():
+                h = v if isinstance(v, str) else v.get("h")
+                if h:
+                    refs.add(h)
+    return refs
+
+
+def prune_project_snapshots(project_id: str, keep: int | None = None) -> int:
+    """Delete this project's oldest snapshot manifests beyond ``keep`` (default:
+    MAX_SNAPSHOTS_PER_PROJECT, read at call time). Returns how many manifests
+    were removed. Objects are freed separately by gc_objects."""
+    if keep is None:
+        keep = MAX_SNAPSHOTS_PER_PROJECT
+    ids = list_snapshots(project_id)
+    if len(ids) <= keep:
+        return 0
+    to_drop = ids[:len(ids) - keep]  # ids are zero-padded, sorted oldest→newest
+    d = _snapshots_dir(project_id)
+    removed = 0
+    for sid in to_drop:
+        try:
+            (d / f"{sid}.json").unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
+
+
+def gc_objects() -> int:
+    """Delete stored objects not referenced by any surviving snapshot (across
+    all projects). Returns the number of objects removed. Aborts safely (returns
+    0) if any manifest is unreadable, so we never delete a still-referenced blob."""
+    try:
+        refs = _referenced_hashes()
+    except Exception:  # noqa: BLE001 - unreadable manifest: don't risk deleting live data
+        return 0
+    objects = _objects_dir()
+    removed = 0
+    for obj in objects.iterdir():
+        if obj.suffix == ".tmp":
+            continue
+        if obj.name not in refs:
+            try:
+                obj.unlink()
+                removed += 1
+            except OSError:
+                pass
+    return removed
 
 
 def _next_snapshot_id(project_id: str) -> str:
@@ -161,8 +297,10 @@ def _write_manifest(snap: Snapshot) -> None:
     path = _snapshots_dir(snap.project_id) / f"{snap.id}.json"
     path.write_text(
         json.dumps(
-            {"id": snap.id, "project_id": snap.project_id,
-             "workdir": snap.workdir, "files": snap.files},
+            {"id": snap.id, "project_id": snap.project_id, "workdir": snap.workdir,
+             "files": {rel: {"h": e.h, "m": e.mode, "t": e.mtime, "s": e.size}
+                       for rel, e in snap.files.items()},
+             "skipped_large": snap.skipped_large},
             indent=0,
         ),
         encoding="utf-8",
@@ -172,8 +310,16 @@ def _write_manifest(snap: Snapshot) -> None:
 def load_snapshot(project_id: str, snap_id: str) -> Snapshot:
     path = _snapshots_dir(project_id) / f"{snap_id}.json"
     d = json.loads(path.read_text(encoding="utf-8"))
-    return Snapshot(id=d["id"], project_id=d["project_id"],
-                    workdir=d["workdir"], files=d["files"])
+    files: dict[str, FileEntry] = {}
+    for rel, v in d["files"].items():
+        # Back-compat: old manifests stored a bare hash string (no metadata).
+        if isinstance(v, str):
+            files[rel] = FileEntry(h=v, mode=None)
+        else:
+            files[rel] = FileEntry(h=v["h"], mode=v.get("m"),
+                                   mtime=v.get("t"), size=v.get("s"))
+    return Snapshot(id=d["id"], project_id=d["project_id"], workdir=d["workdir"],
+                    files=files, skipped_large=d.get("skipped_large", []))
 
 
 def list_snapshots(project_id: str) -> list[str]:
@@ -190,11 +336,16 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> None:
     rules = rules or IgnoreRules()
     wd = Path(snap.workdir).resolve()
 
-    # 1. Restore all files from the manifest.
-    for rel, h in snap.files.items():
+    # 1. Restore all files from the manifest (content + permission mode).
+    for rel, entry in snap.files.items():
         target = wd / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(_read_object(h))
+        target.write_bytes(_read_object(entry.h))
+        if entry.mode is not None:
+            try:
+                target.chmod(entry.mode)
+            except OSError:
+                pass  # best-effort: FS may not support the mode
 
     # 2. Remove files present now but absent from the snapshot (only non-skipped).
     manifest_paths = set(snap.files)

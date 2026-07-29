@@ -210,6 +210,7 @@ class Agent:
             model=self.config.model, messages=self.messages, tools=tools,
             temperature=self.config.temperature, stream=True,
             stream_options={"include_usage": True},
+            api_base=self.config.api_base,  # None => provider default
         )
         content_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
@@ -253,6 +254,7 @@ class Agent:
         resp = await litellm.acompletion(
             model=self.config.model, messages=self.messages, tools=tools,
             temperature=self.config.temperature, stream=False,
+            api_base=self.config.api_base,  # None => provider default
         )
         self.usage.add_response(resp, litellm, model=self.config.model)
         msg = resp.choices[0].message

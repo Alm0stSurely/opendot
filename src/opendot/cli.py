@@ -80,17 +80,19 @@ def _warn_if_missing_key(model: str) -> None:
         )
 
 
-def _build_agent(model: str, workdir: str, confirm=None) -> Agent:
-    # If the chosen model's API key isn't set but another provider's key is,
-    # switch to that provider so opendot works with whatever key the user has.
-    from opendot.providers import env_var_for, model_for_available_key
-    var = env_var_for(model)
-    if var and not os.environ.get(var):
-        alt = model_for_available_key()
-        if alt and alt != model:
-            console.print(f"[dim]no {var}; using [cyan]{alt}[/cyan] "
-                          f"(found its key in your environment)[/dim]")
-            model = alt
+def _build_agent(model: str, workdir: str, confirm=None, api_base: str | None = None) -> Agent:
+    # With a custom api_base (local OpenAI-compatible server like llama.cpp), no
+    # provider key is needed — so skip the auto-switch. Otherwise: if the chosen
+    # model's key isn't set but another provider's is, switch to that provider.
+    if not api_base:
+        from opendot.providers import env_var_for, model_for_available_key
+        var = env_var_for(model)
+        if var and not os.environ.get(var):
+            alt = model_for_available_key()
+            if alt and alt != model:
+                console.print(f"[dim]no {var}; using [cyan]{alt}[/cyan] "
+                              f"(found its key in your environment)[/dim]")
+                model = alt
 
     system = DEFAULT_SYSTEM_PROMPT
     ctx = _load_project_context(workdir)
@@ -109,7 +111,7 @@ def _build_agent(model: str, workdir: str, confirm=None) -> Agent:
         mcp_manager = None
 
     return Agent(
-        AgentConfig(model=model, workdir=workdir, system_prompt=system),
+        AgentConfig(model=model, workdir=workdir, system_prompt=system, api_base=api_base),
         confirm=confirm,
         mcp_manager=mcp_manager,
     )
@@ -357,6 +359,10 @@ def main() -> None:
     parser.add_argument("-p", "--prompt", help="Run a single task and exit (one-shot mode).")
     parser.add_argument("--model", default=os.environ.get("OPENDOT_MODEL", "gpt-5.1"),
                         help="Model id (any LiteLLM model, e.g. gpt-5.1, claude-opus-4-5, ollama/qwen3).")
+    parser.add_argument("--api-base", default=os.environ.get("OPENAI_API_BASE"),
+                        help="Base URL of an OpenAI-compatible server "
+                             "(llama.cpp/llama-server, vLLM, LM Studio). "
+                             "Use with --model openai/<name>.")
     parser.add_argument("-C", "--dir", default=os.getcwd(), help="Working directory (default: cwd).")
     parser.add_argument("--repl", action="store_true", help="Use the plain REPL instead of the full-screen TUI.")
     parser.add_argument("--version", action="version", version=f"opendot {__version__}")
@@ -414,10 +420,10 @@ def main() -> None:
 
     if oneshot:
         # Non-interactive: can't prompt, so decline irreversible commands by default.
-        agent = _build_agent(args.model, workdir, confirm=lambda _p: False)
+        agent = _build_agent(args.model, workdir, confirm=lambda _p: False, api_base=args.api_base)
         asyncio.run(_run_turn(agent, oneshot, rich=False))
     elif args.repl:
-        agent = _build_agent(args.model, workdir, confirm=_confirm)
+        agent = _build_agent(args.model, workdir, confirm=_confirm, api_base=args.api_base)
         _interactive(agent)
     else:
         # Default: the full-screen TUI. It installs its own confirm callback
@@ -425,7 +431,7 @@ def main() -> None:
         # confirmed in-app. The placeholder here is replaced in OpendotTUI.__init__.
         from opendot.tui import run_tui
 
-        agent = _build_agent(args.model, workdir, confirm=lambda _p: False)
+        agent = _build_agent(args.model, workdir, confirm=lambda _p: False, api_base=args.api_base)
         run_tui(agent)
 
 
