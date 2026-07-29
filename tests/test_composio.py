@@ -8,7 +8,7 @@ import stat
 
 import pytest
 
-from opendot import composio_tools as cx
+from opendot.tools import composio as cx
 
 
 @pytest.fixture(autouse=True)
@@ -48,12 +48,23 @@ def test_namespacing_helpers():
     assert not cx.is_composio_tool("mcp__github__create_issue")
 
 
-def test_execute_malformed_name_is_soft_error():
+def test_execute_without_session_is_soft_error():
+    # Configured but no enabled apps → no Tool Router session → soft error,
+    # never a crash.
     cx.set_api_key("k")
-    out = cx.execute_tool("composio__bad", {})
-    assert out.startswith("error: malformed")
+    out = cx.execute_tool("composio__COMPOSIO_SEARCH_TOOLS", {})
+    assert out.startswith("error:")
 
 
 def test_build_specs_empty_without_enabled_apps():
     cx.set_api_key("k")  # configured but no apps enabled
     assert cx.build_tool_specs() == []
+
+
+def test_looks_like_auth_error_distinguishes_auth_from_generic():
+    assert cx.looks_like_auth_error('{"error": "Gmail not connected"}')
+    assert cx.looks_like_auth_error("401 Unauthorized")
+    assert cx.looks_like_auth_error("please connect your account")
+    # generic failures are NOT auth errors
+    assert not cx.looks_like_auth_error("rate limit exceeded")
+    assert not cx.looks_like_auth_error('{"error": "invalid argument: to"}')
