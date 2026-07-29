@@ -136,7 +136,7 @@ ledger. Your built-in file/shell actions stay snapshotted and undoable as usual.
 
 ## Connect apps with Composio
 
-Beyond MCP, opendot can connect to [Composio](https://composio.dev)'s 3000+ app
+Beyond MCP, opendot can connect to [Composio](https://composio.dev)'s 1000+ app
 tools (Gmail, Slack, GitHub, Notion, Linear, …) using **your own** Composio API
 key. Just use `/composio` in the chat:
 
