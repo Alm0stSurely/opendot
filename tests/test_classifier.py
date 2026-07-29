@@ -48,6 +48,23 @@ def test_rm_outside_workspace_flagged():
     assert not _rev("rm ~/important")
 
 
+def test_rm_of_unsnapshotted_dirs_is_irreversible():
+    # These dirs are excluded from snapshots, so deleting them can't be undone —
+    # must be flagged (confirm), never silently auto-run. Regression for the
+    # `rm -rf .git` hole.
+    assert not _rev("rm -rf .git")
+    assert not _rev("rm -rf .git some_folder")
+    assert not _rev("rm -rf node_modules")
+    assert not _rev("rm -rf .venv")
+
+
+def test_rm_of_normal_workspace_paths_stays_reversible():
+    # Normal in-workspace deletes ARE snapshotted → still auto-run (no false alarm).
+    assert _rev("rm -rf some_folder")
+    assert _rev("rm file.txt")
+    assert _rev("rm -rf src/old")
+
+
 def test_outside_path_flagged():
     assert not _rev("cp secret.txt /etc/")
     assert not _rev("mv data ../../out")

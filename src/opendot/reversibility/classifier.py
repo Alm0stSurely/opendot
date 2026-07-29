@@ -39,6 +39,23 @@ _PKG_INSTALL = ("pip install", "pip3 install", "npm install", "npm i ",
 _PRIVILEGE = {"sudo", "doas", "su"}
 _DESTRUCTIVE_DB = re.compile(r"\b(drop|truncate|delete)\s+(table|database|from)\b", re.I)
 
+# Directory names snapshots SKIP by default (mirrors snapshots._DEFAULT_IGNORE_DIRS).
+# Deleting one of these is NOT undoable — it was never captured — so an `rm`
+# that targets them must be treated as irreversible, not auto-run.
+_NOT_SNAPSHOTTED = {".git", ".hg", ".svn", "node_modules", "__pycache__",
+                    ".venv", "venv", ".opendot", ".mypy_cache", ".pytest_cache",
+                    ".ruff_cache", "dist", "build", ".next", ".cache"}
+
+
+def _hits_unsnapshotted_path(command: str) -> str | None:
+    """If the command references a directory that snapshots skip (so it can't be
+    restored), return that name; else None."""
+    tokens = re.split(r"[\s/]+", command)
+    for tok in tokens:
+        if tok in _NOT_SNAPSHOTTED:
+            return tok
+    return None
+
 
 @dataclass
 class Verdict:
@@ -94,6 +111,12 @@ def classify(command: str, workdir: str) -> Verdict:
         # rm inside the workspace is covered by the snapshot; rm outside isn't.
         if _mentions_outside_path(cmd, workdir):
             return Verdict(False, "deletes files outside the workspace")
+        # Deleting a path snapshots SKIP (e.g. .git, node_modules) can't be
+        # undone — it was never captured. Flag it rather than silently run it.
+        skipped = _hits_unsnapshotted_path(cmd)
+        if skipped:
+            return Verdict(False, f"deletes '{skipped}', which opendot doesn't "
+                                  f"snapshot — this can't be undone")
         # in-workspace rm is reversible via snapshot
         return Verdict(True)
     if _mentions_outside_path(cmd, workdir):
