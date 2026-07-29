@@ -17,11 +17,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" /></a>
 </p>
 
-<!-- Demo: replace with a real terminal recording/screenshot of a task + undo.
-<p align="center">
-  <img src="https://raw.githubusercontent.com/vedaant00/opendot/main/assets/demo.gif" alt="opendot demo" width="720" />
-</p>
--->
+https://github.com/user-attachments/assets/164c8e65-13d7-4f71-86af-fca5694f2221
 
 ---
 
