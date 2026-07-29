@@ -8,7 +8,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/provider", "connect a provider + API key"),
     ("/mcp", "manage MCP servers"),
     ("/composio", "connect apps (Gmail, Slack, …)"),
-    ("/log", "show the action ledger"),
+    ("/log", "show the action ledger ( /log clear to wipe it )"),
     ("/undo", "revert the last action ( /undo <id> )"),
     ("/clear", "reset the conversation"),
     ("/compact", "trim old turns to free context"),

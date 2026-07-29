@@ -64,6 +64,11 @@ class Reversibility:
     def history(self) -> list[LedgerEntry]:
         return ledger.read_all(self.project_id)
 
+    def clear_history(self) -> int:
+        """Clear this project's action ledger (discards undo history). Returns
+        the number of entries removed."""
+        return ledger.clear(self.project_id)
+
     def restore_to(self, snapshot_id: str) -> None:
         """Restore the workspace to the state captured in ``snapshot_id``."""
         snap = snapshots.load_snapshot(self.project_id, snapshot_id)
