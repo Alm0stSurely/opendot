@@ -59,6 +59,47 @@ def test_disable_app_removes_locally_and_invalidates_session():
     assert "slack" not in cx.enabled_apps()
 
 
+def test_verify_api_key_accepts_working_key_and_rejects_bad(monkeypatch):
+    # A key is "valid" only if an authenticated call actually succeeds — a bad
+    # key must be rejected up front, not stored and failed on later.
+    import composio
+
+    class _Toolkits:
+        def __init__(self, ok): self._ok = ok
+        def list(self, **_):
+            if not self._ok:
+                raise RuntimeError("401 Unauthorized")
+            return object()
+
+    class _FakeComposio:
+        def __init__(self, api_key=None):
+            # the fixture routes "good"/"bad" via the key string itself
+            self.toolkits = _Toolkits(api_key == "good")
+
+    monkeypatch.setattr(composio, "Composio", _FakeComposio)
+    assert cx.verify_api_key("good") is True
+    assert cx.verify_api_key("bad") is False
+
+
+def test_friendly_error_explains_read_only_key():
+    # The exact 403 a read-only Composio key produces on connect.
+    raw = RuntimeError(
+        "PermissionDenied: 403 - {'error': {'message': 'This API key does not "
+        "have the permissions required for POST /api/v3/connected_accounts...', "
+        "'slug': 'APIKey_InsufficientPermissions', "
+        "'suggested_fix': 'Grant the connected_accounts permission with write.'}}"
+    )
+    msg = cx._friendly_error(raw)
+    assert "read-only" in msg
+    assert "write access" in msg
+    assert "{" not in msg  # no raw JSON blob leaking through
+
+
+def test_friendly_error_surfaces_suggested_fix_for_other_errors():
+    raw = RuntimeError("400 - {'error': {'message': 'bad', 'suggested_fix': 'do the thing'}}")
+    assert cx._friendly_error(raw) == "do the thing"
+
+
 def test_namespacing_helpers():
     assert cx.is_composio_tool("composio__gmail__GMAIL_SEND_EMAIL")
     assert not cx.is_composio_tool("read_file")

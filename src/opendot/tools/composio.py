@@ -25,6 +25,7 @@ the import is unavailable, so a broken install never crashes opendot.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -59,6 +60,19 @@ def save_config(cfg: dict) -> None:
 
 def is_configured() -> bool:
     return bool(load_config().get("api_key"))
+
+
+def verify_api_key(api_key: str) -> bool:
+    """True if the key actually works (a cheap authenticated call succeeds).
+    Lets the caller reject a bad/old key up front instead of storing it and
+    only failing later when apps won't load."""
+    from composio import Composio
+
+    try:
+        Composio(api_key=api_key.strip()).toolkits.list(limit=1)
+        return True
+    except Exception:  # noqa: BLE001 - any failure (auth, network) = don't trust it
+        return False
 
 
 def set_api_key(api_key: str) -> str:
@@ -194,6 +208,25 @@ class ConnectResult:
     error: str | None = None
 
 
+def _friendly_error(exc: Exception) -> str:
+    """Turn a Composio SDK exception into a short, actionable message. Composio
+    puts a human 'message' and a 'suggested_fix' in the error body — surface
+    those instead of dumping the raw 403/JSON at the user."""
+    text = str(exc)
+    # A read-only key is the common one: it authenticates (apps list fine) but
+    # can't create connections. Give the exact fix, not the JSON blob.
+    if "InsufficientPermissions" in text or "write access" in text:
+        return ("your Composio API key is read-only — it can't connect apps. "
+                "Create a key with 'connected_accounts' write access in the "
+                "Composio dashboard, then run /composio to re-enter it.")
+    # Prefer the actionable 'suggested_fix'; fall back to the human 'message'.
+    for field in ("suggested_fix", "message"):
+        m = re.search(rf"'{field}':\s*'([^']+)'", text)
+        if m:
+            return m.group(1)
+    return f"{type(exc).__name__}: {exc}"
+
+
 def begin_connect(slug: str) -> ConnectResult:
     """Start connecting a toolkit. If it needs OAuth, returns the redirect_url and
     the ConnectionRequest (caller opens the browser then calls
@@ -202,7 +235,7 @@ def begin_connect(slug: str) -> ConnectResult:
     try:
         client, user_id = _client()
     except Exception as exc:  # noqa: BLE001
-        return ConnectResult(ok=False, error=f"{type(exc).__name__}: {exc}")
+        return ConnectResult(ok=False, error=_friendly_error(exc))
     # Already connected on Composio's side → reuse it, don't re-authorize (which
     # errors with ComposioMultipleConnectedAccountsError once there's ≥1).
     if slug in list_connected():
@@ -210,7 +243,7 @@ def begin_connect(slug: str) -> ConnectResult:
     try:
         req = client.toolkits.authorize(user_id=user_id, toolkit=slug)
     except Exception as exc:  # noqa: BLE001
-        return ConnectResult(ok=False, error=f"{type(exc).__name__}: {exc}")
+        return ConnectResult(ok=False, error=_friendly_error(exc))
     redirect = getattr(req, "redirect_url", None)
     if redirect:
         return ConnectResult(ok=False, needs_auth=True, redirect_url=redirect, request=req)
@@ -322,7 +355,7 @@ def execute_tool(name: str, arguments: dict) -> str:
     try:
         res = session.execute(tool_slug, arguments=arguments or {})
     except Exception as exc:  # noqa: BLE001
-        return f"error: composio execution failed: {type(exc).__name__}: {exc}"
+        return f"error: {_friendly_error(exc)} (do not retry until fixed)"
     data = getattr(res, "data", None)
     if data is None and isinstance(res, dict):
         data = res.get("data", res)

@@ -19,6 +19,11 @@ from __future__ import annotations
 # audio_*, video_generation, embedding, rerank, …) is filtered out.
 _TEXT_MODES = {"chat", "completion", "responses"}
 
+# Providers whose bare model ids LiteLLM resolves without a "provider/" prefix
+# (so "gpt-4o" / "claude-..." keep their familiar names). Every other provider's
+# bare id must be prefixed or LiteLLM errors with "LLM Provider NOT provided".
+_BARE_OK_PROVIDERS = {"openai", "anthropic"}
+
 
 def _litellm():
     import litellm
@@ -62,6 +67,7 @@ def list_models() -> list[dict]:
         return []
     routable = provider_ids()
     out: list[dict] = []
+    seen: set[str] = set()
     for name, meta in mc.items():
         if not name or name == "sample_spec" or not isinstance(meta, dict):
             continue
@@ -70,7 +76,17 @@ def list_models() -> list[dict]:
         prov = (meta.get("litellm_provider") or "").lower()
         if routable and prov not in routable:
             continue
-        out.append({"model": name, "name": name, "provider": _pretty(prov) if prov else "other"})
+        # LiteLLM resolves bare names only for a few providers (openai,
+        # anthropic); for the rest a bare key like "deepseek-chat" errors with
+        # "LLM Provider NOT provided". Prefix those to get a routable string
+        # ("deepseek/deepseek-chat") while leaving familiar names (gpt-4o,
+        # claude-...) untouched.
+        needs_prefix = "/" not in name and prov and prov not in _BARE_OK_PROVIDERS
+        model = f"{prov}/{name}" if needs_prefix else name
+        if model in seen:  # registry may list both bare and prefixed variants
+            continue
+        seen.add(model)
+        out.append({"model": model, "name": name, "provider": _pretty(prov) if prov else "other"})
     out.sort(key=lambda d: (d["provider"].lower(), d["name"].lower()))
     return out
 
