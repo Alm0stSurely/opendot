@@ -46,6 +46,13 @@ class Reversibility:
         if not self.enabled:
             return ""
         snap = snapshots.take_snapshot(self.workdir, self.rules)
+        # If files were too large to snapshot, this action can't be fully undone —
+        # record that honestly in the ledger note.
+        if snap.skipped_large:
+            n = len(snap.skipped_large)
+            big_note = (f"{n} file(s) too large to snapshot — "
+                        f"changes to them can't be undone")
+            note = f"{note}; {big_note}" if note else big_note
         ledger.append(
             self.project_id,
             LedgerEntry(

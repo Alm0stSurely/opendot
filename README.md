@@ -34,6 +34,10 @@ they run, with an honest note about what can't be undone.
 That's the point of opendot: an agent you can let loose because nothing it does
 is a surprise, and (almost) nothing is irreversible.
 
+opendot is model-agnostic — it works with any model through LiteLLM (OpenAI,
+Anthropic, Google, DeepSeek, …) and runs fully local via Ollama. Ollama is just
+the zero-setup local option; use whatever backend you prefer.
+
 ## Installation
 
 ```bash
@@ -83,6 +87,14 @@ Provider names link to where you get a key.
 | [Ollama](https://ollama.com) (local, no key) | — | `ollama/qwen3` |
 
 Reasoning models stream their thinking live.
+
+**Local OpenAI-compatible servers** (llama.cpp / `llama-server`, vLLM, LM Studio):
+point opendot at the server with `--api-base` and an `openai/`-prefixed model.
+
+```bash
+# e.g. llama.cpp: llama-server -m model.gguf --port 8080
+opendot --model openai/local --api-base http://localhost:8080/v1
+```
 
 **Which model runs.** The default is `gpt-5.1`. If its key (`OPENAI_API_KEY`)
 isn't set but another provider's key is, opendot automatically switches to that

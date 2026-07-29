@@ -25,3 +25,6 @@ class AgentConfig:
     max_steps: int = 40  # hard bound on tool-calling turns per user message
     temperature: float | None = None
     system_prompt: str | None = None  # None => use the built-in default
+    # Base URL for an OpenAI-compatible server (llama.cpp/llama-server, vLLM,
+    # LM Studio, …). Falls back to $OPENAI_API_BASE / the provider default.
+    api_base: str | None = None

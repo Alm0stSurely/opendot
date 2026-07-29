@@ -174,6 +174,88 @@ def test_load_snapshot_roundtrip(tmp_path):
     assert loaded.workdir == s.workdir
 
 
+def test_restore_brings_back_file_permissions(tmp_path):
+    wd = _workspace(tmp_path)
+    script = wd / "run.sh"
+    script.write_text("echo hi")
+    script.chmod(0o755)
+    snap = S.take_snapshot(wd)
+
+    script.chmod(0o644)                       # someone chmods it
+    S.restore_snapshot(S.load_snapshot(snap.project_id, snap.id))
+    assert (os.stat(script).st_mode & 0o777) == 0o755  # mode restored
+
+
+def test_large_files_are_skipped_and_reported(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "_MAX_FILE_BYTES", 1024)  # 1KB cap for the test
+    wd = _workspace(tmp_path)
+    (wd / "small.txt").write_text("ok")
+    (wd / "big.bin").write_bytes(b"x" * 2048)  # over the cap
+    snap = S.take_snapshot(wd)
+    assert "small.txt" in snap.files
+    assert "big.bin" not in snap.files
+    assert snap.skipped_large == ["big.bin"]
+
+
+def test_retention_prunes_old_snapshots_and_gcs_objects(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "MAX_SNAPSHOTS_PER_PROJECT", 3)
+    wd = _workspace(tmp_path)
+    f = wd / "f.txt"
+    snap = None
+    for i in range(6):
+        f.write_text(f"version-{i}")
+        os.utime(f, (i + 1, i + 1))  # deterministic mtimes so each version differs
+        snap = S.take_snapshot(wd)
+    kept = S.list_snapshots(snap.project_id)
+    assert len(kept) == 3                      # only the newest 3 survive
+    # orphaned objects from v0..v2 are GC'd; ~3 remain
+    objs = [o for o in (S._objects_dir()).iterdir() if o.suffix != ".tmp"]
+    assert len(objs) <= 4
+    # the newest snapshot is still fully restorable
+    f.write_text("wrecked")
+    S.restore_snapshot(S.load_snapshot(snap.project_id, snap.id))
+    assert f.read_text() == "version-5"
+
+
+def test_gc_never_deletes_objects_shared_by_another_project(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "MAX_SNAPSHOTS_PER_PROJECT", 2)
+    a = tmp_path / "A"; a.mkdir()
+    b = tmp_path / "B"; b.mkdir()
+    (a / "shared.txt").write_text("SHARED")
+    (b / "shared.txt").write_text("SHARED")   # identical content → one object
+    S.take_snapshot(a)
+    b_snap = S.take_snapshot(b)
+    # churn A past its retention so A's GC runs repeatedly
+    for i in range(4):
+        (a / "x").write_text(str(i)); os.utime(a / "x", (i + 1, i + 1)); S.take_snapshot(a)
+    # B's shared object must survive (still referenced by B) and B must restore
+    (b / "shared.txt").write_text("wrecked")
+    S.restore_snapshot(S.load_snapshot(b_snap.project_id, b_snap.id))
+    assert (b / "shared.txt").read_text() == "SHARED"
+
+
+def test_unchanged_files_are_not_rehashed(tmp_path, monkeypatch):
+    wd = _workspace(tmp_path)
+    (wd / "a.txt").write_text("aaa")
+    (wd / "b.txt").write_text("bbb")
+
+    reads = {"n": 0}
+    orig = S._write_object
+    monkeypatch.setattr(S, "_write_object",
+                        lambda data: (reads.__setitem__("n", reads["n"] + 1), orig(data))[1])
+
+    S.take_snapshot(wd)
+    reads["n"] = 0
+    S.take_snapshot(wd)               # nothing changed
+    assert reads["n"] == 0            # fast path: no re-reads
+
+    import time; time.sleep(0.01)
+    (wd / "a.txt").write_text("changed")
+    reads["n"] = 0
+    S.take_snapshot(wd)
+    assert reads["n"] == 1            # only the changed file re-hashed
+
+
 def test_ledger_clear_wipes_history(tmp_path):
     from opendot.reversibility.engine import Reversibility
     from opendot.reversibility.rules import load_rules
