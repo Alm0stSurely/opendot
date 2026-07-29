@@ -42,6 +42,23 @@ def test_enable_apps_dedup_and_persist():
     assert cx.enabled_apps() == ["gmail", "slack"]
 
 
+def test_disable_app_removes_locally_and_invalidates_session():
+    # With a fake key the revoke network call fails soft (returns 0) but the app
+    # is still removed from the enabled list and the session cache is cleared.
+    cx.set_api_key("k")
+    cx.add_enabled_app("gmail")
+    cx._SESSION = object()  # pretend a session was cached
+    revoked = cx.disable_app("gmail")
+    assert "gmail" not in cx.enabled_apps()
+    assert revoked == 0            # fake key → no real deletion
+    assert cx._SESSION is None     # cache invalidated
+
+    # revoke=False skips the network call entirely
+    cx.add_enabled_app("slack")
+    assert cx.disable_app("slack", revoke=False) == 0
+    assert "slack" not in cx.enabled_apps()
+
+
 def test_namespacing_helpers():
     assert cx.is_composio_tool("composio__gmail__GMAIL_SEND_EMAIL")
     assert not cx.is_composio_tool("read_file")

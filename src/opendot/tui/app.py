@@ -569,14 +569,15 @@ class OpendotTUI(App):
         if slug in enabled:
             choice = await self.push_screen_wait(SearchListModal(
                 f"{slug} — enabled",
-                [("disable", f"Disable {slug} in opendot", "Manage"),
+                [("disable", f"Disconnect {slug}", "Manage"),
                  ("keep", "Keep it enabled", "Manage")],
             ))
             if choice == "disable":
-                cx.disable_app(slug)
+                revoked = await asyncio.to_thread(cx.disable_app, slug)
+                note = "connection revoked" if revoked else "removed locally"
                 self._write(
-                    f"✓ {slug} disabled. Its tools stop loading on next launch "
-                    f"(restart opendot).",
+                    f"✓ {slug} disconnected ({note}). Its tools stop loading on "
+                    f"next launch (restart opendot).",
                     "sys",
                 )
                 self._refresh_sidebar()
