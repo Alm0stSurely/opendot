@@ -181,41 +181,74 @@ def begin_connect(slug: str) -> ConnectResult:
 
 # ---- tool specs + execution (used by the Toolbox) ----
 
-def build_tool_specs() -> list[dict]:
-    """OpenAI-style function specs for all tools of the user's enabled apps.
+# --- Tool Router session (the scalable tool surface) -----------------------
+#
+# A Composio app can expose hundreds of tools; binding them all blows past the
+# model's tools-array cap (OpenAI: 128). So — like Plandot — we use Composio's
+# **Tool Router**: `composio.create(user_id, toolkits=[...])` returns a session
+# whose `.tools()` is a small, bounded set of meta-tools (search / get-schema /
+# execute). The agent discovers the specific tool it needs at runtime via those,
+# and we route calls through `session.execute()`. No cap, nothing truncated.
 
-    Names are namespaced ``composio__<slug>__<TOOL_SLUG>`` so they can't collide
-    with built-ins or MCP tools and are recognisable as external/irreversible.
-    Returns [] if composio isn't installed / configured / has no enabled apps.
-    """
-    apps = enabled_apps()
+_SESSION = None            # cached ToolRouterSession
+_SESSION_APPS: tuple = ()  # the enabled-apps set the cached session was built for
+
+
+def _session():
+    """Return a Tool Router session scoped to the enabled apps, cached until the
+    enabled-app set changes. None if composio is unconfigured/unavailable."""
+    global _SESSION, _SESSION_APPS
+    apps = tuple(enabled_apps())
     if not apps or not composio_available():
-        return []
+        return None
+    if _SESSION is not None and _SESSION_APPS == apps:
+        return _SESSION
     try:
         client, user_id = _client()
+        _SESSION = client.create(user_id=user_id, toolkits=list(apps))
+        _SESSION_APPS = apps
+        return _SESSION
+    except Exception:  # noqa: BLE001
+        _SESSION = None
+        _SESSION_APPS = ()
+        return None
+
+
+def _spec_name(fn_name: str) -> str:
+    return f"composio__{fn_name}"
+
+
+def build_tool_specs() -> list[dict]:
+    """OpenAI-style function specs for the Tool Router meta-tools of the user's
+    enabled apps — a small bounded set (search/execute), never the full tool
+    list, so we never exceed the provider's tools-array limit.
+
+    Names are namespaced ``composio__<tool>`` so they can't collide with
+    built-ins or MCP tools. Returns [] if composio isn't configured / enabled.
+    """
+    session = _session()
+    if session is None:
+        return []
+    try:
+        tools = session.tools()
     except Exception:  # noqa: BLE001
         return []
     specs: list[dict] = []
-    for slug in apps:
-        try:
-            tools = client.tools.get(user_id, toolkits=[slug], limit=1000)
-        except Exception:  # noqa: BLE001
+    for t in tools:
+        fn = t.get("function", t) if isinstance(t, dict) else getattr(t, "function", t)
+        name = (fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", "")) or ""
+        if not name:
             continue
-        for t in tools:
-            fn = t.get("function", t) if isinstance(t, dict) else getattr(t, "function", t)
-            name = (fn.get("name") if isinstance(fn, dict) else getattr(fn, "name", "")) or ""
-            if not name:
-                continue
-            desc = fn.get("description", "") if isinstance(fn, dict) else getattr(fn, "description", "")
-            params = fn.get("parameters", {}) if isinstance(fn, dict) else getattr(fn, "parameters", {})
-            specs.append({
-                "type": "function",
-                "function": {
-                    "name": f"composio__{slug}__{name}",
-                    "description": desc or f"Composio {slug} tool {name}",
-                    "parameters": params or {"type": "object", "properties": {}},
-                },
-            })
+        desc = fn.get("description", "") if isinstance(fn, dict) else getattr(fn, "description", "")
+        params = fn.get("parameters", {}) if isinstance(fn, dict) else getattr(fn, "parameters", {})
+        specs.append({
+            "type": "function",
+            "function": {
+                "name": _spec_name(name),
+                "description": desc or f"Composio tool {name}",
+                "parameters": params or {"type": "object", "properties": {}},
+            },
+        })
     return specs
 
 
@@ -223,27 +256,45 @@ def is_composio_tool(name: str) -> bool:
     return name.startswith("composio__")
 
 
+# Phrases that specifically mean "the app isn't connected", vs. a generic
+# failure (rate limit, bad args). Adapted from Plandot's detect.py. Matched
+# case-insensitively anywhere in the tool output.
+_AUTH_PHRASES = (
+    "not connected", "no active connection", "no connection",
+    "authentication required", "authorization required", "please authorize",
+    "please connect", "not authenticated", "unauthorized", "connect your",
+    "requires authentication", "needs to be connected",
+)
+
+
+def looks_like_auth_error(text: str) -> bool:
+    """True if ``text`` indicates a missing/expired Composio connection (as
+    opposed to a generic failure)."""
+    low = text.lower()
+    return any(p in low for p in _AUTH_PHRASES)
+
+
 def execute_tool(name: str, arguments: dict) -> str:
-    """Run a namespaced composio tool. ``name`` is composio__<slug>__<TOOL_SLUG>."""
+    """Run a Composio Tool Router meta-tool. ``name`` is ``composio__<tool>``;
+    execution goes through the session so discovery/scoping is honored."""
+    tool_slug = name[len("composio__"):]
+    session = _session()
+    if session is None:
+        return "error: Composio session unavailable (not configured?)"
     try:
-        _, _, tool_slug = name.split("__", 2)
-    except ValueError:
-        return f"error: malformed composio tool name {name!r}"
-    try:
-        client, user_id = _client()
-        # skip the toolkit-version check — we execute the latest, same as Plandot
-        # (otherwise the SDK raises ToolVersionRequiredError).
-        res = client.tools.execute(
-            tool_slug, arguments or {},
-            user_id=user_id, dangerously_skip_version_check=True,
-        )
+        res = session.execute(tool_slug, arguments=arguments or {})
     except Exception as exc:  # noqa: BLE001
         return f"error: composio execution failed: {type(exc).__name__}: {exc}"
-    # ToolExecutionResponse — prefer a JSON dump of its data/successful fields.
     data = getattr(res, "data", None)
     if data is None and isinstance(res, dict):
         data = res.get("data", res)
     try:
-        return json.dumps(data if data is not None else res, default=str)[:8000]
+        out = json.dumps(data if data is not None else res, default=str)[:8000]
     except Exception:  # noqa: BLE001
-        return str(res)[:8000]
+        out = str(res)[:8000]
+    # If the failure is an auth/connection problem, tell the user how to fix it
+    # (connect the app) instead of surfacing a raw "not connected" error.
+    if looks_like_auth_error(out):
+        out += ("\n\n[opendot] This looks like an unconnected app — run /composio "
+                "to connect it, then retry.")
+    return out

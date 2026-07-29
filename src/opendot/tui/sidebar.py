@@ -78,7 +78,7 @@ class Sidebar(Static):
 
         # -- Composio (show once a key is set; then list enabled apps) --
         try:
-            from opendot import composio_tools
+            from opendot.tools import composio as composio_tools
             cx_configured = composio_tools.is_configured()
             capps = composio_tools.enabled_apps()
         except Exception:  # noqa: BLE001

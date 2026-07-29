@@ -49,10 +49,10 @@ class OpendotTUI(App):
     #welcome { width: auto; height: 6; }
     Screen.-welcome #transcript { display: none; }
     Screen.-welcome #sidebar { display: none; }
-    /* Anchor the welcome group near the top-center with fixed padding rather
-       than dynamic middle-centering — so opening the command popup grows the
-       column downward instead of re-centering (and shoving) the logo. */
-    Screen.-welcome #main { width: 1fr; height: 1fr; align: center top; padding-top: 9; }
+    /* Center the welcome group vertically. Safe to use middle-align because the
+       command popup is a floating overlay (layer: overlay) — opening it doesn't
+       change this column's height, so the logo never shifts. */
+    Screen.-welcome #main { width: 1fr; height: 1fr; align: center middle; }
     /* All three welcome children share width:60% so #main's align centers them
        as one column. The logo image inside is centered by its Center wrapper. */
     Screen.-welcome #welcome-wrap {
@@ -82,7 +82,7 @@ class OpendotTUI(App):
     .answer { color: $text; border-left: solid #2dd4bf; padding: 0 1; }
     .tool   { color: $text-muted; margin: 1 0 0 2; }
     .toolout{ color: $text-muted; margin: 0 0 0 4; }
-    .err    { color: $error; text-style: bold; border-left: thick $error; padding: 0 1; }
+    .err    { color: $error; text-style: bold; border-left: solid $error; padding: 0 1; }
     .sys    { color: $text-muted; text-style: italic; }
     """
 
@@ -526,7 +526,7 @@ class OpendotTUI(App):
         import asyncio
         import webbrowser
 
-        from opendot import composio_tools as cx
+        from opendot.tools import composio as cx
 
         if not cx.composio_available():
             # composio is a core dep, so this only trips on a broken install.

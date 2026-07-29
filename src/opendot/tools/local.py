@@ -307,15 +307,16 @@ class Toolbox:
                     "parameters": mt.input_schema,
                 },
             })
-        # External Composio tools (never in read-only explorer boxes).
+        # External Composio tools — the Tool Router keeps this a small, bounded
+        # meta-tool set, so we don't need a total-count cap here.
         if not self.read_only:
-            from opendot import composio_tools
+            from opendot.tools import composio as composio_tools
             specs.extend(composio_tools.build_tool_specs())
         return specs
 
     def call(self, name: str, args: dict[str, Any]) -> str:
         # Composio tools are external + opaque like MCP: confirm + mark irreversible.
-        from opendot import composio_tools
+        from opendot.tools import composio as composio_tools
         if composio_tools.is_composio_tool(name):
             reason = "external Composio tool — opendot cannot undo it"
             if not self._confirm(f"Run {name}?  {reason}"):

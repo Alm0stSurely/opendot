@@ -7,6 +7,10 @@ everything it does. Contributions are welcome; please keep that guarantee intact
 opendot is early. Issues and PRs are genuinely appreciated — you don't need to
 ask permission to open one.
 
+**New here?** Browse issues labeled
+[good first issue](https://github.com/vedaant00/opendot/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+— each one names the exact file to change and how to verify it.
+
 ## Changes that are easy to merge
 
 - Bug fixes
@@ -34,7 +38,8 @@ pytest                                          # should be all green
 ```
 src/opendot/
   cli.py           entry point (subcommands, one-shot, REPL)
-  tui.py           the full-screen Textual TUI
+  tui/             the full-screen Textual TUI (app, modals, sidebar, …)
+  catalog.py       model/provider lists sourced from LiteLLM
   agent/           the model-agnostic ReAct loop (LiteLLM), events, prompt, usage
   tools/           local file/shell tools + office (.xlsx/.pptx)
   reversibility/   THE MOAT: content-addressed snapshots, ledger, undo, classifier
