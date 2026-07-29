@@ -86,12 +86,43 @@ def add_enabled_app(slug: str) -> None:
     save_config(cfg)
 
 
-def disable_app(slug: str) -> None:
-    """Remove an app from the enabled list so its tools stop loading. Does not
-    revoke the Composio-side connection (that stays until deleted on Composio)."""
+def disable_app(slug: str, *, revoke: bool = True) -> int:
+    """Remove an app from the enabled list so its tools stop loading. By default
+    also **revokes** the Composio-side connection(s) for that toolkit, so a later
+    reconnect works cleanly (otherwise Composio accumulates duplicate accounts
+    and reconnect fails with ComposioMultipleConnectedAccountsError).
+
+    Returns the number of Composio connections deleted (0 if none/failure)."""
     cfg = load_config()
     cfg["apps"] = [s for s in cfg.get("apps", []) if s != slug]
     save_config(cfg)
+    # Invalidate the cached Tool Router session (its toolkit set changed).
+    global _SESSION, _SESSION_APPS
+    _SESSION, _SESSION_APPS = None, ()
+    if not revoke:
+        return 0
+    return _revoke_connections(slug)
+
+
+def _revoke_connections(slug: str) -> int:
+    """Delete all Composio connected accounts for a toolkit. Returns the count
+    deleted. Never raises."""
+    try:
+        client, user_id = _client()
+        resp = client.connected_accounts.list(user_ids=[user_id], toolkit_slugs=[slug])
+    except Exception:  # noqa: BLE001
+        return 0
+    n = 0
+    for acc in (getattr(resp, "items", None) or []):
+        acc_id = getattr(acc, "id", None) or getattr(acc, "nanoid", None)
+        if not acc_id:
+            continue
+        try:
+            client.connected_accounts.delete(acc_id)
+            n += 1
+        except Exception:  # noqa: BLE001
+            pass
+    return n
 
 
 def composio_available() -> bool:
@@ -166,10 +197,17 @@ class ConnectResult:
 def begin_connect(slug: str) -> ConnectResult:
     """Start connecting a toolkit. If it needs OAuth, returns the redirect_url and
     the ConnectionRequest (caller opens the browser then calls
-    ``wait_for_connection``). If it's a direct/no-auth connector, it's already
-    active and ok=True."""
+    ``wait_for_connection``). If it's a direct/no-auth connector — or already
+    connected — it's active and ok=True."""
     try:
         client, user_id = _client()
+    except Exception as exc:  # noqa: BLE001
+        return ConnectResult(ok=False, error=f"{type(exc).__name__}: {exc}")
+    # Already connected on Composio's side → reuse it, don't re-authorize (which
+    # errors with ComposioMultipleConnectedAccountsError once there's ≥1).
+    if slug in list_connected():
+        return ConnectResult(ok=True)
+    try:
         req = client.toolkits.authorize(user_id=user_id, toolkit=slug)
     except Exception as exc:  # noqa: BLE001
         return ConnectResult(ok=False, error=f"{type(exc).__name__}: {exc}")
