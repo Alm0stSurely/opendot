@@ -525,6 +525,22 @@ class OpendotTUI(App):
             "sys",
         )
 
+    async def _enter_composio_key(self, cx) -> bool:
+        """Prompt for a Composio API key, validate it, and store it only if it
+        works. Returns True on a saved, working key. Can be called both on first
+        setup and to replace a bad/expired key."""
+        import asyncio
+
+        key = await self.push_screen_wait(ApiKeyModal("Composio", "COMPOSIO_API_KEY"))
+        if not key:
+            return False
+        self._write("checking key…", "sys")
+        if not await asyncio.to_thread(cx.verify_api_key, key):
+            self._write("that key didn't work — check it and run /composio again.", "sys")
+            return False
+        cx.set_api_key(key)
+        return True
+
     async def _manage_composio(self) -> None:
         import asyncio
         import webbrowser
@@ -538,10 +554,8 @@ class OpendotTUI(App):
 
         # First run (or no key yet): ask for the Composio API key.
         if not cx.is_configured():
-            key = await self.push_screen_wait(ApiKeyModal("Composio", "COMPOSIO_API_KEY"))
-            if not key:
+            if not await self._enter_composio_key(cx):
                 return
-            cx.set_api_key(key)
             self._write("✓ Composio connected. Run /composio again to browse apps.", "sys")
             self._refresh_sidebar()
             return
@@ -550,8 +564,13 @@ class OpendotTUI(App):
         self._write("loading Composio apps…", "sys")
         apps = await asyncio.to_thread(cx.list_apps)
         if not apps:
-            self._write("couldn't load Composio apps (check your key / connection).", "sys")
-            return
+            # Most likely a bad/expired key (it was stored without validation in
+            # older versions). Offer to re-enter it instead of dead-ending.
+            self._write("couldn't load Composio apps — your key may be invalid or expired.", "sys")
+            if await self._enter_composio_key(cx):
+                apps = await asyncio.to_thread(cx.list_apps)
+            if not apps:
+                return
         connected = await asyncio.to_thread(cx.list_connected)
         enabled = set(cx.enabled_apps())
 
