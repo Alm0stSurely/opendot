@@ -17,7 +17,9 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-yellow?style=flat-square" /></a>
 </p>
 
-https://github.com/user-attachments/assets/164c8e65-13d7-4f71-86af-fca5694f2221
+<p align="center">
+  <img src="https://raw.githubusercontent.com/vedaant00/opendot/main/assets/demo.png" alt="opendot demo" width="760" />
+</p>
 
 ---
 
