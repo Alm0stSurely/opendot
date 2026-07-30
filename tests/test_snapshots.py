@@ -65,6 +65,36 @@ def test_binary_files(tmp_path):
     assert (wd / "blob.bin").read_bytes() == data
 
 
+def test_stored_object_survives_in_place_edit_of_source(tmp_path):
+    """The store may clone (reflink) a file rather than copy it. That must be
+    copy-on-write safe: editing the original file in place after the snapshot
+    must NOT change the stored object, or undo would restore corrupted data."""
+    wd = _workspace(tmp_path)
+    original = b"first version" * 1000
+    (wd / "f.bin").write_bytes(original)
+    snap = S.take_snapshot(wd)
+
+    # Overwrite in place (open+write, not atomic replace) — the worst case for
+    # a naive hardlink. A reflink/copy must be unaffected.
+    with open(wd / "f.bin", "r+b") as fh:
+        fh.seek(0)
+        fh.write(b"XXXX")
+
+    S.restore_snapshot(snap)
+    assert (wd / "f.bin").read_bytes() == original  # stored object was intact
+
+
+def test_large_file_roundtrip_via_streaming(tmp_path):
+    """A multi-chunk file (bigger than the streaming block) round-trips exactly."""
+    wd = _workspace(tmp_path)
+    data = bytes(range(256)) * (S._CHUNK // 128)  # a few MB, spans many chunks
+    (wd / "big.bin").write_bytes(data)
+    snap = S.take_snapshot(wd)
+    (wd / "big.bin").write_bytes(b"nope")
+    S.restore_snapshot(snap)
+    assert (wd / "big.bin").read_bytes() == data
+
+
 def test_empty_file(tmp_path):
     wd = _workspace(tmp_path)
     (wd / "empty").write_text("")
@@ -240,9 +270,9 @@ def test_unchanged_files_are_not_rehashed(tmp_path, monkeypatch):
     (wd / "b.txt").write_text("bbb")
 
     reads = {"n": 0}
-    orig = S._write_object
-    monkeypatch.setattr(S, "_write_object",
-                        lambda data: (reads.__setitem__("n", reads["n"] + 1), orig(data))[1])
+    orig = S._write_object_from_path
+    monkeypatch.setattr(S, "_write_object_from_path",
+                        lambda path: (reads.__setitem__("n", reads["n"] + 1), orig(path))[1])
 
     S.take_snapshot(wd)
     reads["n"] = 0
@@ -271,3 +301,54 @@ def test_ledger_clear_wipes_history(tmp_path):
     assert rev.history() == []
     # clearing an already-empty ledger is a no-op, not an error
     assert rev.clear_history() == 0
+
+
+def test_no_snapshot_action_logs_but_captures_nothing(tmp_path):
+    """OPENDOT_NO_SNAPSHOT path: the action is logged (audit trail) but no
+    snapshot is taken, so nothing sensitive is copied into the store."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    (wd / "secret.txt").write_text("password123")
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+
+    entry_id = rev.before_action("shell", "shred secret.txt", snapshot=False)
+    assert entry_id                                  # a real, sortable id
+    entries = rev.history()
+    assert len(entries) == 1
+    assert entries[0].snapshot_before == ""          # nothing to restore from
+    assert entries[0].reversible is False
+    # no snapshot manifest was written for this project
+    assert S.list_snapshots(rev.project_id) == []
+    # and the secret content is NOT sitting in the object store
+    objs = S.store_root() / "objects"
+    assert not objs.exists() or not any(objs.iterdir())
+
+
+def test_undo_noops_on_no_snapshot_action(tmp_path):
+    """Undoing a no-snapshot action must not crash — there's nothing to restore."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+    rev.before_action("shell", "shred x", snapshot=False)
+    assert rev.undo_last() is None                   # no-op, not an exception
+
+
+def test_no_snapshot_ids_stay_monotonic_with_real_snapshots(tmp_path):
+    """A no-snapshot entry followed by a real snapshot keeps ids sortable/unique."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    (wd / "a.txt").write_text("v1")
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+
+    id1 = rev.before_action("write", "a.txt", reversible=True)          # real snap
+    id2 = rev.before_action("shell", "shred y", snapshot=False)         # no snap
+    id3 = rev.before_action("write", "a.txt", reversible=True)          # real snap
+    ids = [id1, id2, id3]
+    assert ids == sorted(ids)                        # strictly increasing
+    assert len(set(ids)) == 3                         # all unique

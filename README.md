@@ -183,6 +183,22 @@ Honest boundary: opendot cannot undo effects that leave your machine (a sent
 email, a dropped remote database, a `git push`). It tells you *before* running
 those, rather than pretending otherwise.
 
+**Skipping the snapshot on purpose.** When opendot runs a shell command it
+snapshots first — but for something you *want* gone (securely wiping a secret) or
+a huge throwaway file, that snapshot would keep a recoverable copy in the store.
+Prefixing the command opendot runs with `OPENDOT_NO_SNAPSHOT=1` skips the
+snapshot for that one command:
+
+```
+OPENDOT_NO_SNAPSHOT=1 shred secrets.txt
+```
+
+The action is still logged for the audit trail, but marked not-undoable (no
+snapshot backs it). This only affects commands opendot itself runs; anything you
+run in your own shell outside opendot is never snapshotted or logged either way.
+To exclude paths from snapshotting permanently, use the `skip:` rule in
+`OPENDOT.md`.
+
 ## Contributing
 
 Issues and PRs welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for setup and

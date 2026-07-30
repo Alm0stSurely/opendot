@@ -38,13 +38,38 @@ class Reversibility:
         reversible: bool = True,
         note: str = "",
         timestamp: str = "",
+        snapshot: bool = True,
     ) -> str:
         """Snapshot the workspace and log the action about to happen.
+
+        When ``snapshot`` is False, the action is still logged (for the audit
+        trail) but no snapshot is taken — so nothing is captured into the store.
+        Used for the OPENDOT_NO_SNAPSHOT escape hatch, where the whole point is to
+        NOT keep a recoverable copy (e.g. shredding a secret). Such an action is
+        inherently not reversible.
 
         Returns the snapshot id (== ledger entry id). No-op returns "" if disabled.
         """
         if not self.enabled:
             return ""
+        if not snapshot:
+            # No snapshot is taken, so derive a sortable id from the shared
+            # action-id counter (snapshots + ledger both feed it), keeping ids
+            # unique and monotonic even when snapshot and no-snapshot actions mix.
+            entry_id = f"{snapshots.max_action_id(self.project_id) + 1:06d}"
+            ledger.append(
+                self.project_id,
+                LedgerEntry(
+                    id=entry_id,
+                    kind=kind,
+                    detail=detail,
+                    snapshot_before="",  # no snapshot exists to restore
+                    reversible=False,
+                    note=note,
+                    timestamp=timestamp,
+                ),
+            )
+            return entry_id
         snap = snapshots.take_snapshot(self.workdir, self.rules)
         # If files were too large to snapshot, this action can't be fully undone —
         # record that honestly in the ledger note.
@@ -90,5 +115,8 @@ class Reversibility:
         if not entries:
             return None
         last_entry = entries[-1]
+        if not last_entry.snapshot_before:
+            # A no-snapshot action (OPENDOT_NO_SNAPSHOT) has nothing to restore.
+            return None
         self.restore_to(last_entry.snapshot_before)
         return last_entry
