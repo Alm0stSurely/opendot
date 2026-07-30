@@ -83,17 +83,47 @@ class IgnoreRules:
 # Hashing / object storage
 # ---------------------------------------------------------------------------
 
-def _hash_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+# Chunk size for streaming a file through the hash / into the store, so a large
+# file is never loaded whole into memory.
+_CHUNK = 1024 * 1024  # 1 MB
 
 
-def _write_object(data: bytes) -> str:
-    """Store bytes by content hash; return the hash. Idempotent."""
-    h = _hash_bytes(data)
+def _hash_file(path: Path) -> str:
+    """SHA-256 of a file, read in chunks (never loads the whole file into RAM)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(_CHUNK), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _clone_or_copy(src: Path, dst: Path) -> None:
+    """Copy src -> dst, preferring a copy-on-write clone (reflink) so identical
+    blocks are shared until one side is written. Safe because store objects are
+    immutable (never edited in place), and CoW means a later edit to the source
+    file allocates new blocks rather than corrupting the stored object.
+
+    Falls back to a plain streamed copy on filesystems without reflink support.
+    """
+    try:
+        # Python 3.14+ / platforms with clonefile (APFS) or FICLONE (Btrfs/XFS)
+        # honor copy-on-write here; elsewhere it's a normal copy.
+        import shutil
+        shutil.copyfile(src, dst)  # uses OS CoW fast-copy when available
+    except OSError:
+        with open(src, "rb") as fin, open(dst, "wb") as fout:
+            for block in iter(lambda: fin.read(_CHUNK), b""):
+                fout.write(block)
+
+
+def _write_object_from_path(path: Path) -> str:
+    """Store a file by content hash without loading it into memory; return the
+    hash. Streams the hash, then clones/copies the bytes into the store."""
+    h = _hash_file(path)
     obj = _objects_dir() / h
     if not obj.exists():
         tmp = obj.with_suffix(".tmp")
-        tmp.write_bytes(data)
+        _clone_or_copy(path, tmp)
         tmp.replace(obj)  # atomic
     return h
 
@@ -180,10 +210,9 @@ def take_snapshot(workdir: str | Path, rules: IgnoreRules | None = None) -> Snap
             skipped_large.append(rel)
             continue
         try:
-            data = f.read_bytes()
+            h = _write_object_from_path(f)  # streams: never loads the file whole
         except OSError:
             continue  # unreadable file: skip rather than fail the whole snapshot
-        h = _write_object(data)
         files[rel] = FileEntry(h=h, mode=mode, mtime=st.st_mtime, size=st.st_size)
 
     snap_id = _next_snapshot_id(pid)
@@ -285,12 +314,34 @@ def gc_objects() -> int:
     return removed
 
 
+def max_action_id(project_id: str) -> int:
+    """Highest action id seen for this project, across BOTH snapshot manifests and
+    ledger entries. Snapshot and ledger ids share one monotonic sequence, but a
+    no-snapshot action (OPENDOT_NO_SNAPSHOT) advances only the ledger — so the id
+    counter must consider both to stay unique. 0 if none.
+    """
+    d = _snapshots_dir(project_id)
+    ids = [int(p.stem) for p in d.glob("*.json") if p.stem.isdigit()]
+    # The ledger lives at <store>/ledger/<project>.jsonl; read ids without
+    # importing the ledger module (that would be a circular import).
+    ledger_file = store_root() / "ledger" / f"{project_id}.jsonl"
+    if ledger_file.exists():
+        for line in ledger_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                lid = json.loads(line).get("id", "")
+                if isinstance(lid, str) and lid.isdigit():
+                    ids.append(int(lid))
+            except Exception:  # noqa: BLE001 - a malformed line shouldn't break id gen
+                continue
+    return max(ids) if ids else 0
+
+
 def _next_snapshot_id(project_id: str) -> str:
     """Monotonic, sortable id. Counter persisted per project (no wall-clock dep)."""
-    d = _snapshots_dir(project_id)
-    existing = sorted(int(p.stem) for p in d.glob("*.json") if p.stem.isdigit())
-    n = (existing[-1] + 1) if existing else 1
-    return f"{n:06d}"
+    return f"{max_action_id(project_id) + 1:06d}"
 
 
 def _write_manifest(snap: Snapshot) -> None:

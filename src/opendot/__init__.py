@@ -13,6 +13,6 @@ from opendot.agent.loop import Agent
 from opendot.agent.config import AgentConfig
 from opendot.agent.events import Event
 
-__version__ = "0.1.4"
+__version__ = "0.1.5"
 
 __all__ = ["Agent", "AgentConfig", "Event", "__version__"]

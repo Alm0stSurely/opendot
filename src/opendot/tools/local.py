@@ -165,6 +165,19 @@ class Toolbox:
             return f"{verb} {rel}\n" + _unified_diff(old, content, rel)
 
         def run_shell(command: str, timeout: int = 120) -> str:
+            # Escape hatch: prefixing a command with OPENDOT_NO_SNAPSHOT=1 runs it
+            # WITHOUT snapshotting first. Use it for things you *want* gone and
+            # don't want a recoverable copy of (e.g. `shred secrets.txt`) or huge
+            # throwaway files not worth capturing. The action is still logged, but
+            # marked not-reversible since no snapshot backs it.
+            no_snapshot = False
+            stripped = command.lstrip()
+            for prefix in ("OPENDOT_NO_SNAPSHOT=1 ", "OPENDOT_NO_SNAPSHOT=true "):
+                if stripped.startswith(prefix):
+                    no_snapshot = True
+                    command = stripped[len(prefix):]
+                    break
+
             # Classify the command: safe/contained vs. irreversible/escaping.
             from opendot.reversibility.classifier import classify
 
@@ -177,12 +190,19 @@ class Toolbox:
                 if not ok:
                     return "skipped: user declined an irreversible command"
 
-            # Snapshot before running (records reversibility from the verdict).
+            # Snapshot before running (records reversibility from the verdict),
+            # unless the user opted out for this one command.
             if self.rev is not None:
-                self.rev.before_action(
-                    "shell", command,
-                    reversible=verdict.reversible, note=verdict.reason,
-                )
+                if no_snapshot:
+                    self.rev.before_action(
+                        "shell", command, snapshot=False,
+                        note="snapshot skipped (OPENDOT_NO_SNAPSHOT) — not undoable",
+                    )
+                else:
+                    self.rev.before_action(
+                        "shell", command,
+                        reversible=verdict.reversible, note=verdict.reason,
+                    )
             try:
                 proc = subprocess.run(
                     command,
