@@ -71,6 +71,9 @@ that mutates the filesystem:
   words. If you can't explain the change briefly, it's probably too large.
 - **Don't add fake affordances** — no UI hints or commands for features that
   don't actually work.
+- **Don't bump the version.** Leave `version` in `pyproject.toml` (and
+  `__init__.py`) alone — releases are cut by the maintainer via a `v*` tag, and
+  the tag must match the version, so bumps happen at release time, not in your PR.
 
 ### PR titles
 
