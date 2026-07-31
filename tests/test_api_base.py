@@ -85,11 +85,21 @@ async def test_api_base_propagates_into_nonstreaming_completion():
     assert fake.calls[0]["stream"] is False
 
 
-async def test_api_base_defaults_to_none():
+async def test_api_base_defaults_to_none_nonstreaming():
     """No ``--api-base`` => ``api_base=None`` reaches acompletion (provider default)."""
     a = _bare_agent(None)
     fake = _RecordingLiteLLM()
     async for _ in a._nonstream_turn(fake, []):
+        pass
+    assert fake.calls[0]["api_base"] is None
+
+
+async def test_api_base_defaults_to_none_streaming():
+    """Streaming counterpart: no ``--api-base`` => ``api_base=None`` reaches the
+    streaming acompletion call too."""
+    a = _bare_agent(None)
+    fake = _RecordingLiteLLM()
+    async for _ in a._stream_turn(fake, []):
         pass
     assert fake.calls[0]["api_base"] is None
 
