@@ -76,7 +76,7 @@ class Toolbox:
     """
 
     #: tools that only observe — never mutate the filesystem or run commands.
-    READ_ONLY = {"list_files", "read_file", "grep", "glob", "read_xlsx", "read_pptx"}
+    READ_ONLY = {"list_files", "read_file", "grep", "glob", "read_xlsx", "read_pptx", "web_fetch"}
 
     def __init__(
         self,
@@ -301,6 +301,21 @@ class Toolbox:
             rel = self._rel(p)
             return f"edited {rel} ({replaced} replacement(s))\n" + _unified_diff(text, new, rel)
 
+        def web_fetch(url: str) -> str:
+            """Fetch an http(s) URL and return its content as LLM-ready markdown
+            (structured text, headings, links, tables) via PyScrappy. Read-only:
+            it never mutates the workspace, so it runs without a snapshot, like
+            read_file."""
+            if not url.lower().startswith(("http://", "https://")):
+                return "error: only http:// and https:// URLs are supported"
+            import pyscrappy
+
+            try:
+                result = pyscrappy.scrape(url)
+            except Exception as exc:  # noqa: BLE001 - surface any fetch failure to the model
+                return f"error fetching {url}: {type(exc).__name__}: {exc}"
+            return _truncate(result.to_markdown()) or "(empty response)"
+
         return [
             Tool(
                 "list_files",
@@ -402,6 +417,21 @@ class Toolbox:
                     "required": ["path", "find", "replace"],
                 },
                 edit,
+            ),
+            Tool(
+                "web_fetch",
+                "Fetch an http(s) URL and return its content as markdown (text, headings, links, tables). Read-only.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "url": {
+                            "type": "string",
+                            "description": "http:// or https:// URL to fetch.",
+                        },
+                    },
+                    "required": ["url"],
+                },
+                web_fetch,
             ),
         ]
 

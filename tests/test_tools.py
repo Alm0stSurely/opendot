@@ -78,4 +78,34 @@ def test_new_tools_are_in_specs(tmp_path):
         "read_file",
         "write_file",
         "list_files",
+        "web_fetch",
     } <= names
+
+
+def test_web_fetch_returns_markdown(tmp_path, monkeypatch):
+    """web_fetch delegates to PyScrappy and returns its markdown, without hitting
+    the network (PyScrappy's scrape is stubbed)."""
+    import pyscrappy
+
+    class _Result:
+        def to_markdown(self):
+            return "# Example\n\nHello world."
+
+    monkeypatch.setattr(pyscrappy, "scrape", lambda url: _Result())
+    tb, _, _ = _tb(tmp_path)
+    out = tb.call("web_fetch", {"url": "https://example.com"})
+    assert "# Example" in out and "Hello world." in out
+
+
+def test_web_fetch_rejects_non_http_schemes(tmp_path):
+    """Only http(s) — never file:// (would exfiltrate local files) or others."""
+    tb, _, _ = _tb(tmp_path)
+    for bad in ("file:///etc/passwd", "ftp://x/y", "data:text/plain,hi"):
+        out = tb.call("web_fetch", {"url": bad})
+        assert out.startswith("error: only http")
+
+
+def test_web_fetch_is_read_only():
+    from opendot.tools.local import Toolbox
+
+    assert "web_fetch" in Toolbox.READ_ONLY  # runs without a snapshot, like read_file
