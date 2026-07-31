@@ -194,7 +194,7 @@ def _note_lockfiles(console, changed: list[str]) -> None:
 
 
 def _cmd_mcp(args) -> None:
-    """`opendot mcp add|list|remove` — manage external MCP servers."""
+    """`opendot mcp add|list|remove|test` — manage external MCP servers."""
     from opendot.mcp import (
         MCPManager,
         add_mcp_server,
@@ -266,7 +266,10 @@ def _cmd_mcp(args) -> None:
             if args.name in manager.connected:
                 names = [tool.name for tool in manager.tools if tool.server == args.name]
                 suffix = f": {', '.join(names)}" if names else ""
-                console.print(f"[green]✓ connected[/green] — {len(names)} tools{suffix}")
+                tool_label = "tool" if len(names) == 1 else "tools"
+                console.print(
+                    f"[green]✓ connected[/green] — {len(names)} {tool_label}{suffix}"
+                )
             else:
                 error = manager.errors.get(args.name, "connection did not complete")
                 console.print(f"[red]✗ connection failed[/red] — {error}")

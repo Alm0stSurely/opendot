@@ -185,7 +185,7 @@ def test_mcp_test_cli_reports_connected_tools(tmp_path, monkeypatch, capsys):
 
     output = capsys.readouterr().out
     assert "connected" in output
-    assert "1 tools: ping" in output
+    assert "1 tool: ping" in output
 
 
 def test_mcp_test_cli_reports_connection_error(tmp_path, monkeypatch, capsys):
