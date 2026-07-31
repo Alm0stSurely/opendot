@@ -196,6 +196,7 @@ def _note_lockfiles(console, changed: list[str]) -> None:
 def _cmd_mcp(args) -> None:
     """`opendot mcp add|list|remove` — manage external MCP servers."""
     from opendot.mcp import (
+        MCPManager,
         add_mcp_server,
         load_mcp_config,
         remove_mcp_server,
@@ -251,6 +252,26 @@ def _cmd_mcp(args) -> None:
         console.print(
             f"[green]added[/green] MCP server [cyan]{args.name}[/cyan]. It will connect next time you run opendot."
         )
+        return
+
+    if cmd == "test":
+        servers = load_mcp_config()
+        spec = servers.get(args.name)
+        if spec is None:
+            console.print(f"[red]no MCP server named {args.name!r}.[/red]")
+            return
+        manager = MCPManager({args.name: spec})
+        try:
+            manager.start()
+            if args.name in manager.connected:
+                names = [tool.name for tool in manager.tools if tool.server == args.name]
+                suffix = f": {', '.join(names)}" if names else ""
+                console.print(f"[green]✓ connected[/green] — {len(names)} tools{suffix}")
+            else:
+                error = manager.errors.get(args.name, "connection did not complete")
+                console.print(f"[red]✗ connection failed[/red] — {error}")
+        finally:
+            manager.shutdown()
         return
 
     if cmd == "remove":
@@ -462,6 +483,8 @@ def main() -> None:
     mcp_sub.add_parser("list", help="List configured MCP servers.")
     p_rm = mcp_sub.add_parser("remove", help="Remove an MCP server.")
     p_rm.add_argument("name", help="Server name to remove.")
+    p_test = mcp_sub.add_parser("test", help="Connect to one server and list its tools.")
+    p_test.add_argument("name", help="Configured server name to test.")
 
     args = parser.parse_args(argv)
     args.post_dashdash = post_dashdash
