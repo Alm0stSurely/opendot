@@ -47,6 +47,7 @@ def test_nested_dirs(tmp_path):
     snap = S.take_snapshot(wd)
 
     import shutil
+
     shutil.rmtree(wd / "src")  # delete the whole subtree
     assert not (wd / "src").exists()
 
@@ -211,7 +212,7 @@ def test_restore_brings_back_file_permissions(tmp_path):
     script.chmod(0o755)
     snap = S.take_snapshot(wd)
 
-    script.chmod(0o644)                       # someone chmods it
+    script.chmod(0o644)  # someone chmods it
     S.restore_snapshot(S.load_snapshot(snap.project_id, snap.id))
     assert (os.stat(script).st_mode & 0o777) == 0o755  # mode restored
 
@@ -237,7 +238,7 @@ def test_retention_prunes_old_snapshots_and_gcs_objects(tmp_path, monkeypatch):
         os.utime(f, (i + 1, i + 1))  # deterministic mtimes so each version differs
         snap = S.take_snapshot(wd)
     kept = S.list_snapshots(snap.project_id)
-    assert len(kept) == 3                      # only the newest 3 survive
+    assert len(kept) == 3  # only the newest 3 survive
     # orphaned objects from v0..v2 are GC'd; ~3 remain
     objs = [o for o in (S._objects_dir()).iterdir() if o.suffix != ".tmp"]
     assert len(objs) <= 4
@@ -249,15 +250,19 @@ def test_retention_prunes_old_snapshots_and_gcs_objects(tmp_path, monkeypatch):
 
 def test_gc_never_deletes_objects_shared_by_another_project(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "MAX_SNAPSHOTS_PER_PROJECT", 2)
-    a = tmp_path / "A"; a.mkdir()
-    b = tmp_path / "B"; b.mkdir()
+    a = tmp_path / "A"
+    a.mkdir()
+    b = tmp_path / "B"
+    b.mkdir()
     (a / "shared.txt").write_text("SHARED")
-    (b / "shared.txt").write_text("SHARED")   # identical content → one object
+    (b / "shared.txt").write_text("SHARED")  # identical content → one object
     S.take_snapshot(a)
     b_snap = S.take_snapshot(b)
     # churn A past its retention so A's GC runs repeatedly
     for i in range(4):
-        (a / "x").write_text(str(i)); os.utime(a / "x", (i + 1, i + 1)); S.take_snapshot(a)
+        (a / "x").write_text(str(i))
+        os.utime(a / "x", (i + 1, i + 1))
+        S.take_snapshot(a)
     # B's shared object must survive (still referenced by B) and B must restore
     (b / "shared.txt").write_text("wrecked")
     S.restore_snapshot(S.load_snapshot(b_snap.project_id, b_snap.id))
@@ -271,19 +276,24 @@ def test_unchanged_files_are_not_rehashed(tmp_path, monkeypatch):
 
     reads = {"n": 0}
     orig = S._write_object_from_path
-    monkeypatch.setattr(S, "_write_object_from_path",
-                        lambda path: (reads.__setitem__("n", reads["n"] + 1), orig(path))[1])
+    monkeypatch.setattr(
+        S,
+        "_write_object_from_path",
+        lambda path: (reads.__setitem__("n", reads["n"] + 1), orig(path))[1],
+    )
 
     S.take_snapshot(wd)
     reads["n"] = 0
-    S.take_snapshot(wd)               # nothing changed
-    assert reads["n"] == 0            # fast path: no re-reads
+    S.take_snapshot(wd)  # nothing changed
+    assert reads["n"] == 0  # fast path: no re-reads
 
-    import time; time.sleep(0.01)
+    import time
+
+    time.sleep(0.01)
     (wd / "a.txt").write_text("changed")
     reads["n"] = 0
     S.take_snapshot(wd)
-    assert reads["n"] == 1            # only the changed file re-hashed
+    assert reads["n"] == 1  # only the changed file re-hashed
 
 
 def test_ledger_clear_wipes_history(tmp_path):
@@ -314,12 +324,12 @@ def test_undo_reports_changed_lockfile(tmp_path):
     rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
 
     rev.before_action("shell", "npm install foo", reversible=True)  # snapshot before
-    (wd / "package-lock.json").write_text('{"version": 2}')          # "install" changes it
+    (wd / "package-lock.json").write_text('{"version": 2}')  # "install" changes it
 
     undone = rev.undo_last()
     assert undone is not None
     assert (wd / "package-lock.json").read_text() == '{"version": 1}'  # rolled back
-    assert rev.last_changed_lockfiles == ["package-lock.json"]         # and reported
+    assert rev.last_changed_lockfiles == ["package-lock.json"]  # and reported
 
 
 def test_undo_reports_lockfile_created_by_install(tmp_path):
@@ -332,11 +342,11 @@ def test_undo_reports_lockfile_created_by_install(tmp_path):
     (wd / "app.py").write_text("x = 1")
     rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
 
-    rev.before_action("shell", "uv add requests", reversible=True)   # no lockfile yet
-    (wd / "uv.lock").write_text("locked")                            # install creates one
+    rev.before_action("shell", "uv add requests", reversible=True)  # no lockfile yet
+    (wd / "uv.lock").write_text("locked")  # install creates one
 
     rev.undo_last()
-    assert not (wd / "uv.lock").exists()                             # removed on undo
+    assert not (wd / "uv.lock").exists()  # removed on undo
     assert rev.last_changed_lockfiles == ["uv.lock"]
 
 
@@ -365,10 +375,10 @@ def test_no_snapshot_action_logs_but_captures_nothing(tmp_path):
     rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
 
     entry_id = rev.before_action("shell", "shred secret.txt", snapshot=False)
-    assert entry_id                                  # a real, sortable id
+    assert entry_id  # a real, sortable id
     entries = rev.history()
     assert len(entries) == 1
-    assert entries[0].snapshot_before == ""          # nothing to restore from
+    assert entries[0].snapshot_before == ""  # nothing to restore from
     assert entries[0].reversible is False
     # no snapshot manifest was written for this project
     assert S.list_snapshots(rev.project_id) == []
@@ -385,7 +395,7 @@ def test_undo_noops_on_no_snapshot_action(tmp_path):
     wd = _workspace(tmp_path)
     rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
     rev.before_action("shell", "shred x", snapshot=False)
-    assert rev.undo_last() is None                   # no-op, not an exception
+    assert rev.undo_last() is None  # no-op, not an exception
 
 
 def test_no_snapshot_ids_stay_monotonic_with_real_snapshots(tmp_path):
@@ -397,9 +407,9 @@ def test_no_snapshot_ids_stay_monotonic_with_real_snapshots(tmp_path):
     (wd / "a.txt").write_text("v1")
     rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
 
-    id1 = rev.before_action("write", "a.txt", reversible=True)          # real snap
-    id2 = rev.before_action("shell", "shred y", snapshot=False)         # no snap
-    id3 = rev.before_action("write", "a.txt", reversible=True)          # real snap
+    id1 = rev.before_action("write", "a.txt", reversible=True)  # real snap
+    id2 = rev.before_action("shell", "shred y", snapshot=False)  # no snap
+    id3 = rev.before_action("write", "a.txt", reversible=True)  # real snap
     ids = [id1, id2, id3]
-    assert ids == sorted(ids)                        # strictly increasing
-    assert len(set(ids)) == 3                         # all unique
+    assert ids == sorted(ids)  # strictly increasing
+    assert len(set(ids)) == 3  # all unique

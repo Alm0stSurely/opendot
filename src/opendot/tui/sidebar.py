@@ -62,7 +62,9 @@ class Sidebar(Static):
         # -- Providers (which API keys are set this session) --
         try:
             import os
+
             from opendot.providers import known_key_vars
+
             connected_providers = [var for var in known_key_vars() if os.environ.get(var)]
         except Exception:  # noqa: BLE001
             connected_providers = []
@@ -79,6 +81,7 @@ class Sidebar(Static):
         # -- Composio (show once a key is set; then list enabled apps) --
         try:
             from opendot.tools import composio as composio_tools
+
             cx_configured = composio_tools.is_configured()
             capps = composio_tools.enabled_apps()
         except Exception:  # noqa: BLE001

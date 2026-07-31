@@ -27,6 +27,7 @@ _BARE_OK_PROVIDERS = {"openai", "anthropic"}
 
 def _litellm():
     import litellm
+
     return litellm
 
 
@@ -47,8 +48,11 @@ def provider_ids() -> set[str]:
 def _pretty(provider_id: str) -> str:
     """A display name for a provider id (best-effort title-casing)."""
     special = {
-        "openai": "OpenAI", "xai": "xAI", "ai21": "AI21",
-        "openrouter": "OpenRouter", "huggingface": "Hugging Face",
+        "openai": "OpenAI",
+        "xai": "xAI",
+        "ai21": "AI21",
+        "openrouter": "OpenRouter",
+        "huggingface": "Hugging Face",
     }
     if provider_id in special:
         return special[provider_id]
@@ -86,7 +90,13 @@ def list_models() -> list[dict]:
         if model in seen:  # registry may list both bare and prefixed variants
             continue
         seen.add(model)
-        out.append({"model": model, "name": name, "provider": _pretty(prov) if prov else "other"})
+        out.append(
+            {
+                "model": model,
+                "name": name,
+                "provider": _pretty(prov) if prov else "other",
+            }
+        )
     out.sort(key=lambda d: (d["provider"].lower(), d["name"].lower()))
     return out
 

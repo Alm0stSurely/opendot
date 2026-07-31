@@ -22,29 +22,84 @@ from pathlib import Path
 # Commands whose whole job is contained, read-only, or trivially reversible.
 # Only these auto-run without confirmation.
 _SAFE_COMMANDS = {
-    "ls", "cat", "head", "tail", "pwd", "echo", "grep", "rg", "find", "wc",
-    "diff", "tree", "stat", "file", "which", "env", "date", "whoami",
-    "clear", "cls",  # harmless read-only terminal commands
-    "python", "python3", "node", "pytest", "go", "cargo",  # running code in-workspace
-    "touch", "mkdir", "cp", "mv",  # in-workspace fs ops (snapshot covers them)
-    "sed", "awk", "sort", "uniq", "cut", "tr",
+    "ls",
+    "cat",
+    "head",
+    "tail",
+    "pwd",
+    "echo",
+    "grep",
+    "rg",
+    "find",
+    "wc",
+    "diff",
+    "tree",
+    "stat",
+    "file",
+    "which",
+    "env",
+    "date",
+    "whoami",
+    "clear",
+    "cls",  # harmless read-only terminal commands
+    "python",
+    "python3",
+    "node",
+    "pytest",
+    "go",
+    "cargo",  # running code in-workspace
+    "touch",
+    "mkdir",
+    "cp",
+    "mv",  # in-workspace fs ops (snapshot covers them)
+    "sed",
+    "awk",
+    "sort",
+    "uniq",
+    "cut",
+    "tr",
 }
 
 # Signals that a command escapes the workspace or is hard/impossible to undo.
 _NETWORK = {"curl", "wget", "ssh", "scp", "rsync", "ftp", "nc", "telnet"}
 _VCS_REMOTE = ("git push", "git pull", "git fetch", "git clone")
-_PKG_INSTALL = ("pip install", "pip3 install", "npm install", "npm i ",
-                "yarn add", "apt install", "apt-get install", "brew install",
-                "uv pip install", "uv add", "cargo install", "gem install")
+_PKG_INSTALL = (
+    "pip install",
+    "pip3 install",
+    "npm install",
+    "npm i ",
+    "yarn add",
+    "apt install",
+    "apt-get install",
+    "brew install",
+    "uv pip install",
+    "uv add",
+    "cargo install",
+    "gem install",
+)
 _PRIVILEGE = {"sudo", "doas", "su"}
 _DESTRUCTIVE_DB = re.compile(r"\b(drop|truncate|delete)\s+(table|database|from)\b", re.I)
 
 # Directory names snapshots SKIP by default (mirrors snapshots._DEFAULT_IGNORE_DIRS).
 # Deleting one of these is NOT undoable — it was never captured — so an `rm`
 # that targets them must be treated as irreversible, not auto-run.
-_NOT_SNAPSHOTTED = {".git", ".hg", ".svn", "node_modules", "__pycache__",
-                    ".venv", "venv", ".opendot", ".mypy_cache", ".pytest_cache",
-                    ".ruff_cache", "dist", "build", ".next", ".cache"}
+_NOT_SNAPSHOTTED = {
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".opendot",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "dist",
+    "build",
+    ".next",
+    ".cache",
+}
 
 
 def _hits_unsnapshotted_path(command: str) -> str | None:
@@ -115,8 +170,10 @@ def classify(command: str, workdir: str) -> Verdict:
         # undone — it was never captured. Flag it rather than silently run it.
         skipped = _hits_unsnapshotted_path(cmd)
         if skipped:
-            return Verdict(False, f"deletes '{skipped}', which opendot doesn't "
-                                  f"snapshot — this can't be undone")
+            return Verdict(
+                False,
+                f"deletes '{skipped}', which opendot doesn't snapshot — this can't be undone",
+            )
         # in-workspace rm is reversible via snapshot
         return Verdict(True)
     if _mentions_outside_path(cmd, workdir):

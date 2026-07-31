@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "opendot"
-version = "0.1.6"
+version = "0.1.7"
 description = "An interactive terminal AI agent you can fully undo — any model, acts on your real files, every action reversible."
 readme = "README.md"
 license = "MIT"
@@ -42,6 +42,16 @@ Repository = "https://github.com/vedaant00/opendot"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/opendot"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+# The formatter owns line width; E501 only fires on lines it can't split
+# (long string literals, Rich markup, CSS), so enforcing it adds noise, not value.
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

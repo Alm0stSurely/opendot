@@ -13,7 +13,7 @@ deterministic/testable); callers pass a timestamp string or leave it blank.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -24,12 +24,12 @@ ActionKind = Literal["write", "shell"]
 
 @dataclass
 class LedgerEntry:
-    id: str                 # matches the snapshot id taken before this action
+    id: str  # matches the snapshot id taken before this action
     kind: ActionKind
-    detail: str             # path written, or the shell command
-    snapshot_before: str    # snapshot id capturing state BEFORE the action
+    detail: str  # path written, or the shell command
+    snapshot_before: str  # snapshot id capturing state BEFORE the action
     reversible: bool = True
-    note: str = ""          # e.g. "escapes workspace: git push"
+    note: str = ""  # e.g. "escapes workspace: git push"
     timestamp: str = ""
 
 

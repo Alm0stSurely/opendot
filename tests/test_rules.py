@@ -1,6 +1,6 @@
 """Tests for OPENDOT.md snapshot rule parsing."""
 
-from opendot.reversibility.rules import parse_rules_text, load_rules
+from opendot.reversibility.rules import load_rules, parse_rules_text
 
 
 def test_no_block_is_defaults():

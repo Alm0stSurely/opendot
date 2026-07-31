@@ -40,9 +40,10 @@ def _chunk(with_choices, with_usage):
 class _FakeLiteLLM(types.SimpleNamespace):
     async def acompletion(self, **kw):
         async def gen():
-            yield _chunk(True, False)   # content only
-            yield _chunk(True, True)    # last content chunk WITH usage
-            yield _chunk(False, True)   # final usage-only chunk (duplicate)
+            yield _chunk(True, False)  # content only
+            yield _chunk(True, True)  # last content chunk WITH usage
+            yield _chunk(False, True)  # final usage-only chunk (duplicate)
+
         return gen()
 
     def cost_per_token(self, model, prompt_tokens, completion_tokens):
@@ -66,7 +67,7 @@ def test_streaming_usage_counted_once_not_doubled():
             pass
 
     asyncio.run(run())
-    assert a.usage.total_tokens == 1500          # not 3000
+    assert a.usage.total_tokens == 1500  # not 3000
     assert round(a.usage.cost_usd, 4) == 0.0075  # not 0.015
 
 
@@ -88,5 +89,5 @@ def test_add_response_cost_from_tokens():
     resp = types.SimpleNamespace(usage=_Usage())
     u.add_response(resp, _StubLiteLLM(), model="gpt-4o")
     assert u.total_tokens == 1500
-    assert round(u.cost_usd, 4) == 0.03          # 0.01 + 0.02 from cost_per_token
-    assert calls["completion_cost"] == 0         # token-based path was used
+    assert round(u.cost_usd, 4) == 0.03  # 0.01 + 0.02 from cost_per_token
+    assert calls["completion_cost"] == 0  # token-based path was used

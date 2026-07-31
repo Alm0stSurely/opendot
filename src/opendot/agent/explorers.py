@@ -18,7 +18,7 @@ Events are lane-tagged (lane = subagent index) so the TUI can show parallel
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
 from opendot.agent.events import Event
 
@@ -33,9 +33,7 @@ anything; those tools are not available to you.
 """
 
 
-async def run_explorers(
-    tasks: list[str], *, model: str, workdir: str
-) -> AsyncIterator[Event]:
+async def run_explorers(tasks: list[str], *, model: str, workdir: str) -> AsyncIterator[Event]:
     """Run each task as a concurrent read-only subagent, yielding lane-tagged
     events, and finally a merged findings summary the caller can use."""
     from opendot.agent.config import AgentConfig
@@ -52,11 +50,16 @@ async def run_explorers(
 
     async def one(lane: int, task: str) -> None:
         await q.put(Event("explorer_start", text=task, lane=lane))
-        agent = Agent(AgentConfig(
-            model=model, workdir=workdir, system_prompt=_EXPLORER_SYSTEM,
-        ))
+        agent = Agent(
+            AgentConfig(
+                model=model,
+                workdir=workdir,
+                system_prompt=_EXPLORER_SYSTEM,
+            )
+        )
         # Force a read-only toolbox regardless of defaults.
         from opendot.tools.local import Toolbox
+
         agent.toolbox = Toolbox(workdir, reversibility=None, read_only=True)
         answer_parts: list[str] = []
         try:
@@ -87,7 +90,7 @@ async def run_explorers(
 
     # Attach the merged findings as the tool's textual result via a final event.
     merged = "\n\n".join(
-        f"[explorer {i+1}] {tasks[i]}\n{findings.get(i, '(no findings)')}"
+        f"[explorer {i + 1}] {tasks[i]}\n{findings.get(i, '(no findings)')}"
         for i in range(len(tasks))
     )
     yield Event("tool_end", tool="spawn_explorers", result=merged)

@@ -110,7 +110,7 @@ class OpendotTUI(App):
             return False
 
     def compose(self) -> ComposeResult:
-        from textual.containers import Center, Vertical
+        from textual.containers import Center
         from textual.widgets import OptionList
 
         yield Header(show_clock=False)
@@ -146,6 +146,7 @@ class OpendotTUI(App):
         of showing a black box."""
         try:
             from textual_image.widget import Image
+
             if _LOGO_PATH.exists():
                 return Image(self._logo_on_theme_bg(), id="welcome")
         except Exception:  # noqa: BLE001 - any failure → text fallback
@@ -162,6 +163,7 @@ class OpendotTUI(App):
         we leave the PNG transparent and let the image protocol composite it."""
         try:
             from PIL import Image as PILImage
+
             logo = PILImage.open(_LOGO_PATH).convert("RGBA")
             bbox = logo.getbbox()  # tight box around non-transparent pixels
             if bbox:
@@ -182,6 +184,7 @@ class OpendotTUI(App):
         background keeps matching the (possibly light) screen. Only matters
         while the welcome screen is still up — it's gone after the first message.
         Recomposites in place (Image.image is settable) to avoid a widget swap."""
+
         def _rebuild():
             try:
                 if not self.screen.has_class("-welcome"):
@@ -198,9 +201,11 @@ class OpendotTUI(App):
 
     def _mode_line(self):
         return Text.assemble(
-            ("  esc ", "bold cyan"), ("interrupt", "dim"),
+            ("  esc ", "bold cyan"),
+            ("interrupt", "dim"),
             ("  ·  ", "dim"),
-            ("ctrl+p ", "bold cyan"), ("commands", "dim"),
+            ("ctrl+p ", "bold cyan"),
+            ("commands", "dim"),
         )
 
     def _dismiss_welcome(self) -> None:
@@ -244,6 +249,7 @@ class OpendotTUI(App):
     # -- slash-command autocomplete --
     def _popup(self):
         from textual.widgets import OptionList
+
         return self.query_one("#cmdpopup", OptionList)
 
     @property
@@ -272,7 +278,9 @@ class OpendotTUI(App):
         # ACTUAL width at render time — no manual padding that can overshoot the
         # width and wrap the description onto a second line.
         for name, desc in matches:
-            popup.add_option(Option(_row_bar(name, desc, right_style="dim", left_style="bold"), id=name))
+            popup.add_option(
+                Option(_row_bar(name, desc, right_style="dim", left_style="bold"), id=name)
+            )
         popup.highlighted = 0
         # Float it just above the input (after layout settles so heights are known).
         self.call_after_refresh(self._position_popup)
@@ -328,13 +336,21 @@ class OpendotTUI(App):
             return
         popup = self._popup()
         if event.key == "down":
-            popup.action_cursor_down(); event.stop(); event.prevent_default()
+            popup.action_cursor_down()
+            event.stop()
+            event.prevent_default()
         elif event.key == "up":
-            popup.action_cursor_up(); event.stop(); event.prevent_default()
+            popup.action_cursor_up()
+            event.stop()
+            event.prevent_default()
         elif event.key == "tab":
-            self._accept_popup(run=False); event.stop(); event.prevent_default()
+            self._accept_popup(run=False)
+            event.stop()
+            event.prevent_default()
         elif event.key == "escape":
-            popup.display = False; event.stop(); event.prevent_default()
+            popup.display = False
+            event.stop()
+            event.prevent_default()
 
     # -- input handling --
     async def on_input_submitted(self, event: Input.Submitted) -> None:
@@ -370,6 +386,7 @@ class OpendotTUI(App):
         # Header: system username + local time, then the message.
         import datetime
         import getpass
+
         try:
             who = getpass.getuser()
         except Exception:  # noqa: BLE001
@@ -394,16 +411,23 @@ class OpendotTUI(App):
         """If the current model needs an API key that isn't set, write a friendly
         hint to the transcript and return True (so the caller skips the turn)."""
         import os
+
         from opendot.providers import env_var_for
 
         var = env_var_for(self.agent.config.model)
         if not var or os.environ.get(var):
             return False
-        self._write(Text.assemble(
-            ("no API key for ", "yellow"), (self.agent.config.model, "bold yellow"), ("\n", ""),
-            (f"Set {var}, or run ", "dim"), ("/provider", "bold"),
-            (" to paste one. Keys: github.com/vedaant00/opendot#any-model", "dim"),
-        ), "err")
+        self._write(
+            Text.assemble(
+                ("no API key for ", "yellow"),
+                (self.agent.config.model, "bold yellow"),
+                ("\n", ""),
+                (f"Set {var}, or run ", "dim"),
+                ("/provider", "bold"),
+                (" to paste one. Keys: github.com/vedaant00/opendot#any-model", "dim"),
+            ),
+            "err",
+        )
         return True
 
     def _slash(self, text: str) -> None:
@@ -411,7 +435,10 @@ class OpendotTUI(App):
         cmd = cmd.lower()
         a = self.agent
         if cmd == "help":
-            self._write("commands: /log /undo [id] /clear /compact /model /provider /mcp /composio /help", "sys")
+            self._write(
+                "commands: /log /undo [id] /clear /compact /model /provider /mcp /composio /help",
+                "sys",
+            )
         elif cmd == "clear":
             a.reset()
             self._clear_transcript()
@@ -448,14 +475,17 @@ class OpendotTUI(App):
         self._write(f"model → {model}", "sys")
         self._refresh_sidebar()
         # Nudge if the key for this model isn't set yet.
-        from opendot.providers import env_var_for
         import os
+
+        from opendot.providers import env_var_for
+
         var = env_var_for(model)
         if var and not os.environ.get(var):
             self._write(f"note: {var} is not set — use /provider to connect.", "sys")
 
     async def _pick_model(self) -> None:
         import asyncio
+
         from opendot import catalog
 
         # Text chat models from LiteLLM's registry, grouped by provider.
@@ -471,6 +501,7 @@ class OpendotTUI(App):
 
     async def _connect_provider(self) -> None:
         import asyncio
+
         from opendot.providers import connectable_providers, register_key
 
         # LiteLLM-routable providers that have text models (from the catalog).
@@ -499,9 +530,7 @@ class OpendotTUI(App):
         # Build the list: each server with a status glyph, then an Add entry.
         items: list[tuple[str, str, str]] = []
         for name, spec in servers.items():
-            target = spec.get("url") or " ".join(
-                [spec.get("command", "")] + spec.get("args", [])
-            )
+            target = spec.get("url") or " ".join([spec.get("command", "")] + spec.get("args", []))
             if name in connected:
                 n = sum(1 for mt in mgr.tools if mt.server == name)
                 status = f"✓ {n} tools"
@@ -566,7 +595,10 @@ class OpendotTUI(App):
         if not apps:
             # Most likely a bad/expired key (it was stored without validation in
             # older versions). Offer to re-enter it instead of dead-ending.
-            self._write("couldn't load Composio apps — your key may be invalid or expired.", "sys")
+            self._write(
+                "couldn't load Composio apps — your key may be invalid or expired.",
+                "sys",
+            )
             if await self._enter_composio_key(cx):
                 apps = await asyncio.to_thread(cx.list_apps)
             if not apps:
@@ -579,7 +611,9 @@ class OpendotTUI(App):
         items: list[tuple[str, str, str, str]] = []
         for app in apps:
             slug = app["slug"]
-            status = "✓ enabled" if slug in enabled else ("· connected" if slug in connected else "")
+            status = (
+                "✓ enabled" if slug in enabled else ("· connected" if slug in connected else "")
+            )
             label = f"{app['name']}   {slug}"
             items.append((slug, label, "Apps", status))
 
@@ -589,11 +623,15 @@ class OpendotTUI(App):
 
         # Already enabled → offer to disable it (remove from opendot's tool set).
         if slug in enabled:
-            choice = await self.push_screen_wait(SearchListModal(
-                f"{slug} — enabled",
-                [("disable", f"Disconnect {slug}", "Manage"),
-                 ("keep", "Keep it enabled", "Manage")],
-            ))
+            choice = await self.push_screen_wait(
+                SearchListModal(
+                    f"{slug} — enabled",
+                    [
+                        ("disable", f"Disconnect {slug}", "Manage"),
+                        ("keep", "Keep it enabled", "Manage"),
+                    ],
+                )
+            )
             if choice == "disable":
                 revoked = await asyncio.to_thread(cx.disable_app, slug)
                 note = "connection revoked" if revoked else "removed locally"
@@ -622,8 +660,7 @@ class OpendotTUI(App):
                 return
         cx.add_enabled_app(slug)
         self._write(
-            f"✓ {slug} connected and enabled. Its tools load on next launch "
-            f"(restart opendot).",
+            f"✓ {slug} connected and enabled. Its tools load on next launch (restart opendot).",
             "sys",
         )
         self._refresh_sidebar()
@@ -635,6 +672,7 @@ class OpendotTUI(App):
         def flush_answer():
             if buf:
                 from rich.console import Group
+
                 self._write(
                     Group(Text("opendot", style="bold green"), Markdown("".join(buf))),
                     "answer",
@@ -653,7 +691,8 @@ class OpendotTUI(App):
                     mode = "answer"
                     buf.append(ev.text)
                 elif ev.type == "tool_start":
-                    flush_answer(); mode = None
+                    flush_answer()
+                    mode = None
                     args = "  ".join(str(v)[:50] for v in ev.args.values())
                     line = Text("→ ", style="dim").append(ev.tool, style="bold")
                     if args:
@@ -663,15 +702,26 @@ class OpendotTUI(App):
                     self._write(_render_tool_result(ev.tool, ev.result), "toolout")
                     self._refresh_sidebar()
                 elif ev.type == "explorer_start":
-                    flush_answer(); mode = None
-                    self._write(Text(f"⇉ explorer {ev.lane + 1}: {ev.text}", style="bold magenta"), "tool")
+                    flush_answer()
+                    mode = None
+                    self._write(
+                        Text(f"⇉ explorer {ev.lane + 1}: {ev.text}", style="bold magenta"),
+                        "tool",
+                    )
                 elif ev.type == "explorer_step":
-                    self._write(Text(f"    [{ev.lane + 1}] {ev.text}", style="magenta"), "toolout")
+                    self._write(
+                        Text(f"    [{ev.lane + 1}] {ev.text}", style="magenta"),
+                        "toolout",
+                    )
                 elif ev.type == "explorer_done":
                     first = (ev.text.strip().splitlines() or ["(done)"])[0]
-                    self._write(Text(f"    [{ev.lane + 1}] ✓ {first[:100]}", style="dim magenta"), "toolout")
+                    self._write(
+                        Text(f"    [{ev.lane + 1}] ✓ {first[:100]}", style="dim magenta"),
+                        "toolout",
+                    )
                 elif ev.type == "error":
-                    flush_answer(); mode = None
+                    flush_answer()
+                    mode = None
                     self._write(Text(ev.text), "err")
             flush_answer()
         finally:
@@ -711,7 +761,7 @@ class OpendotTUI(App):
             changed_locks = rev.last_changed_lockfiles
             what = f"the last action ({undone.kind}: {undone.detail.rsplit('/', 1)[-1]})"
 
-        self._write(f"↺ reverted {what}", "sys")   # immediate, deterministic ack
+        self._write(f"↺ reverted {what}", "sys")  # immediate, deterministic ack
         self._refresh_sidebar()
         # Then the agent narrates the undo (and, per its system prompt, loudly
         # warns about environment drift when a lockfile changed). Detection is
@@ -743,10 +793,12 @@ class OpendotTUI(App):
         if not rev.history():
             self._write("no actions to clear", "sys")
             return
-        ok = await self.push_screen_wait(ConfirmModal(
-            "Clear the action ledger for this project?\n"
-            "This discards the undo history — past actions can no longer be undone."
-        ))
+        ok = await self.push_screen_wait(
+            ConfirmModal(
+                "Clear the action ledger for this project?\n"
+                "This discards the undo history — past actions can no longer be undone."
+            )
+        )
         if not ok:
             return
         n = rev.clear_history()

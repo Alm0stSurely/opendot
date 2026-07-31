@@ -50,8 +50,8 @@ def test_disable_app_removes_locally_and_invalidates_session():
     cx._SESSION = object()  # pretend a session was cached
     revoked = cx.disable_app("gmail")
     assert "gmail" not in cx.enabled_apps()
-    assert revoked == 0            # fake key → no real deletion
-    assert cx._SESSION is None     # cache invalidated
+    assert revoked == 0  # fake key → no real deletion
+    assert cx._SESSION is None  # cache invalidated
 
     # revoke=False skips the network call entirely
     cx.add_enabled_app("slack")
@@ -65,7 +65,9 @@ def test_verify_api_key_accepts_working_key_and_rejects_bad(monkeypatch):
     import composio
 
     class _Toolkits:
-        def __init__(self, ok): self._ok = ok
+        def __init__(self, ok):
+            self._ok = ok
+
         def list(self, **_):
             if not self._ok:
                 raise RuntimeError("401 Unauthorized")

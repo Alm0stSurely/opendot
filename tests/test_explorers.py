@@ -5,8 +5,6 @@ import asyncio
 import pytest
 
 from opendot.tools.local import Toolbox
-from opendot.reversibility.engine import Reversibility
-from opendot.reversibility.snapshots import IgnoreRules
 
 
 @pytest.fixture(autouse=True)
@@ -45,6 +43,7 @@ async def test_explorers_run_parallel_readonly_and_return_findings(tmp_path, mon
         def __init__(self, config=None, confirm=None):
             self.config = config
             from opendot.tools.local import Toolbox
+
             self.toolbox = Toolbox(config.workdir, read_only=True)
 
         async def run(self, task):
@@ -78,6 +77,4 @@ async def test_explorers_run_parallel_readonly_and_return_findings(tmp_path, mon
     assert order[0].startswith("start") and order[1].startswith("start")
 
     # nothing was written anywhere (read-only)
-    assert not any(tmp_path.iterdir()) or all(
-        p.name == "store" for p in tmp_path.iterdir()
-    )
+    assert not any(tmp_path.iterdir()) or all(p.name == "store" for p in tmp_path.iterdir())
