@@ -78,8 +78,7 @@ class Reversibility:
         # record that honestly in the ledger note.
         if snap.skipped_large:
             n = len(snap.skipped_large)
-            big_note = (f"{n} file(s) too large to snapshot — "
-                        f"changes to them can't be undone")
+            big_note = f"{n} file(s) too large to snapshot — changes to them can't be undone"
             note = f"{note}; {big_note}" if note else big_note
         ledger.append(
             self.project_id,

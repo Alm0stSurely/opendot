@@ -27,6 +27,7 @@ from pathlib import Path
 # Store location
 # ---------------------------------------------------------------------------
 
+
 def store_root() -> Path:
     """Root of the global opendot store (override with OPENDOT_HOME, for tests)."""
     root = Path(os.environ.get("OPENDOT_HOME", Path.home() / ".opendot"))
@@ -55,9 +56,20 @@ def project_id_for(workdir: str | Path) -> str:
 # Ignore rules
 # ---------------------------------------------------------------------------
 
-_DEFAULT_IGNORE_DIRS = {".git", ".hg", ".svn", "node_modules", "__pycache__",
-                        ".venv", "venv", "env", ".mypy_cache", ".pytest_cache",
-                        ".opendot", ".DS_Store"}
+_DEFAULT_IGNORE_DIRS = {
+    ".git",
+    ".hg",
+    ".svn",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "env",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".opendot",
+    ".DS_Store",
+}
 
 
 @dataclass
@@ -109,6 +121,7 @@ def _clone_or_copy(src: Path, dst: Path) -> None:
         # Python 3.14+ / platforms with clonefile (APFS) or FICLONE (Btrfs/XFS)
         # honor copy-on-write here; elsewhere it's a normal copy.
         import shutil
+
         shutil.copyfile(src, dst)  # uses OS CoW fast-copy when available
     except OSError:
         with open(src, "rb") as fin, open(dst, "wb") as fout:
@@ -147,8 +160,9 @@ _MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB
 class FileEntry:
     """One captured file: content hash, POSIX mode bits, and (mtime, size) so a
     later snapshot can skip re-hashing an unchanged file."""
+
     h: str
-    mode: int | None = None   # st_mode & 0o777, or None if unknown (old snapshots)
+    mode: int | None = None  # st_mode & 0o777, or None if unknown (old snapshots)
     mtime: float | None = None
     size: int | None = None
 
@@ -202,8 +216,7 @@ def take_snapshot(workdir: str | Path, rules: IgnoreRules | None = None) -> Snap
         mode = st.st_mode & 0o777
         # Fast path: unchanged since the last snapshot → reuse its hash, no read.
         old = prev.get(rel)
-        if (old is not None and old.mtime == st.st_mtime and old.size == st.st_size
-                and old.h):
+        if old is not None and old.mtime == st.st_mtime and old.size == st.st_size and old.h:
             files[rel] = FileEntry(h=old.h, mode=mode, mtime=st.st_mtime, size=st.st_size)
             continue
         if st.st_size > _MAX_FILE_BYTES:
@@ -216,8 +229,13 @@ def take_snapshot(workdir: str | Path, rules: IgnoreRules | None = None) -> Snap
         files[rel] = FileEntry(h=h, mode=mode, mtime=st.st_mtime, size=st.st_size)
 
     snap_id = _next_snapshot_id(pid)
-    snap = Snapshot(id=snap_id, project_id=pid, workdir=str(wd),
-                    files=files, skipped_large=skipped_large)
+    snap = Snapshot(
+        id=snap_id,
+        project_id=pid,
+        workdir=str(wd),
+        files=files,
+        skipped_large=skipped_large,
+    )
     _write_manifest(snap)
 
     # Bound disk growth: drop this project's oldest snapshots beyond the
@@ -280,7 +298,7 @@ def prune_project_snapshots(project_id: str, keep: int | None = None) -> int:
     ids = list_snapshots(project_id)
     if len(ids) <= keep:
         return 0
-    to_drop = ids[:len(ids) - keep]  # ids are zero-padded, sorted oldest→newest
+    to_drop = ids[: len(ids) - keep]  # ids are zero-padded, sorted oldest→newest
     d = _snapshots_dir(project_id)
     removed = 0
     for sid in to_drop:
@@ -348,10 +366,16 @@ def _write_manifest(snap: Snapshot) -> None:
     path = _snapshots_dir(snap.project_id) / f"{snap.id}.json"
     path.write_text(
         json.dumps(
-            {"id": snap.id, "project_id": snap.project_id, "workdir": snap.workdir,
-             "files": {rel: {"h": e.h, "m": e.mode, "t": e.mtime, "s": e.size}
-                       for rel, e in snap.files.items()},
-             "skipped_large": snap.skipped_large},
+            {
+                "id": snap.id,
+                "project_id": snap.project_id,
+                "workdir": snap.workdir,
+                "files": {
+                    rel: {"h": e.h, "m": e.mode, "t": e.mtime, "s": e.size}
+                    for rel, e in snap.files.items()
+                },
+                "skipped_large": snap.skipped_large,
+            },
             indent=0,
         ),
         encoding="utf-8",
@@ -367,10 +391,14 @@ def load_snapshot(project_id: str, snap_id: str) -> Snapshot:
         if isinstance(v, str):
             files[rel] = FileEntry(h=v, mode=None)
         else:
-            files[rel] = FileEntry(h=v["h"], mode=v.get("m"),
-                                   mtime=v.get("t"), size=v.get("s"))
-    return Snapshot(id=d["id"], project_id=d["project_id"], workdir=d["workdir"],
-                    files=files, skipped_large=d.get("skipped_large", []))
+            files[rel] = FileEntry(h=v["h"], mode=v.get("m"), mtime=v.get("t"), size=v.get("s"))
+    return Snapshot(
+        id=d["id"],
+        project_id=d["project_id"],
+        workdir=d["workdir"],
+        files=files,
+        skipped_large=d.get("skipped_large", []),
+    )
 
 
 def list_snapshots(project_id: str) -> list[str]:
@@ -384,9 +412,18 @@ def list_snapshots(project_id: str) -> list[str]:
 # user must re-run their package manager to actually match it. (Ledger principle:
 # never let "files restored" be mistaken for "environment restored".)
 _LOCKFILES = {
-    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "npm-shrinkwrap.json",
-    "uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt",
-    "Cargo.lock", "Gemfile.lock", "composer.lock", "go.sum",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml",
+    "npm-shrinkwrap.json",
+    "uv.lock",
+    "poetry.lock",
+    "Pipfile.lock",
+    "requirements.txt",
+    "Cargo.lock",
+    "Gemfile.lock",
+    "composer.lock",
+    "go.sum",
 }
 
 

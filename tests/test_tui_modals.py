@@ -5,10 +5,8 @@ must NEVER bubble up and get submitted as a chat message. This reproduces and
 guards the leak where pressing Enter in ApiKeyModal sent the key to the agent.
 """
 
-import pytest
-
-from opendot.tui import OpendotTUI, ApiKeyModal
 from opendot.agent.events import Event
+from opendot.tui import ApiKeyModal, OpendotTUI
 
 
 class _FakeUsage:

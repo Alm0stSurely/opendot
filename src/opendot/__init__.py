@@ -9,10 +9,10 @@ Public SDK surface (so CLI, and future clients, are thin layers over this):
         ...
 """
 
-from opendot.agent.loop import Agent
 from opendot.agent.config import AgentConfig
 from opendot.agent.events import Event
+from opendot.agent.loop import Agent
 
-__version__ = "0.1.6"
+__version__ = "0.1.7"
 
 __all__ = ["Agent", "AgentConfig", "Event", "__version__"]

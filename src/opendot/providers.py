@@ -15,7 +15,7 @@ import os
 # (including GPT-via-Azure, OpenRouter, etc.) is derived from the convention.
 _ENV_OVERRIDES: dict[str, str] = {
     "huggingface": "HF_TOKEN",
-    "gemini": "GEMINI_API_KEY",     # provider id is 'gemini', not 'google'
+    "gemini": "GEMINI_API_KEY",  # provider id is 'gemini', not 'google'
     "vertex_ai": "GOOGLE_APPLICATION_CREDENTIALS",
     "bedrock": "AWS_ACCESS_KEY_ID",
     "azure": "AZURE_API_KEY",
@@ -23,8 +23,14 @@ _ENV_OVERRIDES: dict[str, str] = {
 
 # Local providers that need no API key. LiteLLM lists these in provider_list
 # but doesn't flag "keyless", so we name them. Matches LiteLLM's local set.
-_KEYLESS_PROVIDERS = {"ollama", "ollama_chat", "vllm", "hosted_vllm",
-                      "lm_studio", "llamafile"}
+_KEYLESS_PROVIDERS = {
+    "ollama",
+    "ollama_chat",
+    "vllm",
+    "hosted_vllm",
+    "lm_studio",
+    "llamafile",
+}
 # Model-string prefixes for those providers (derived — keep in one place).
 NO_KEY_PREFIXES = tuple(f"{p}/" for p in sorted(_KEYLESS_PROVIDERS))
 
@@ -33,6 +39,7 @@ def connectable_providers() -> list[tuple[str, str]]:
     """(display name, env var) pairs for the `/provider` flow — the LiteLLM-
     routable providers that have text models, from the catalog."""
     from opendot import catalog
+
     return [(p["name"], p["env"]) for p in catalog.list_providers()]
 
 
@@ -42,6 +49,7 @@ def known_key_vars() -> list[str]:
     catalog's connectable providers, falling back to the override set."""
     try:
         from opendot import catalog
+
         vars_ = [p["env"] for p in catalog.list_providers()]
         if vars_:
             return vars_
@@ -65,8 +73,12 @@ def _env_for_provider_id(provider: str) -> str | None:
 
 # Bare-model routing: LiteLLM sends these prefixes to a canonical provider.
 # Used only when a bare model id isn't found in the registry.
-_BARE_ROUTING = {"gpt-": "openai", "o1": "openai", "o3": "openai",
-                 "claude": "anthropic"}
+_BARE_ROUTING = {
+    "gpt-": "openai",
+    "o1": "openai",
+    "o3": "openai",
+    "claude": "anthropic",
+}
 
 
 def _provider_id_for(model: str) -> str | None:
@@ -94,6 +106,7 @@ def _provider_id_for(model: str) -> str | None:
 def _model_registry() -> dict:
     try:
         import litellm
+
         return litellm.model_cost
     except Exception:  # noqa: BLE001
         return {}
@@ -112,9 +125,18 @@ def env_var_for(model: str) -> str | None:
 
 
 # Preference order for auto-selecting a model when several provider keys are set.
-_AUTO_ORDER = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
-               "DEEPSEEK_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY",
-               "XAI_API_KEY", "COHERE_API_KEY", "OPENROUTER_API_KEY", "HF_TOKEN"]
+_AUTO_ORDER = [
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "XAI_API_KEY",
+    "COHERE_API_KEY",
+    "OPENROUTER_API_KEY",
+    "HF_TOKEN",
+]
 
 
 def model_for_available_key() -> str | None:
@@ -154,6 +176,7 @@ def list_models() -> list[str]:
     """
     try:
         from opendot import catalog
+
         return sorted({m["model"] for m in catalog.list_models()})
     except Exception:  # noqa: BLE001 - registry unavailable
         return []

@@ -17,12 +17,11 @@ import sys
 from pathlib import Path
 
 from rich.console import Console
-from rich.markdown import Markdown
 from rich.panel import Panel
 
 from opendot import __version__
-from opendot.agent.loop import Agent
 from opendot.agent.config import AgentConfig
+from opendot.agent.loop import Agent
 from opendot.agent.prompt import DEFAULT_SYSTEM_PROMPT
 
 console = Console()
@@ -86,12 +85,15 @@ def _build_agent(model: str, workdir: str, confirm=None, api_base: str | None = 
     # model's key isn't set but another provider's is, switch to that provider.
     if not api_base:
         from opendot.providers import env_var_for, model_for_available_key
+
         var = env_var_for(model)
         if var and not os.environ.get(var):
             alt = model_for_available_key()
             if alt and alt != model:
-                console.print(f"[dim]no {var}; using [cyan]{alt}[/cyan] "
-                              f"(found its key in your environment)[/dim]")
+                console.print(
+                    f"[dim]no {var}; using [cyan]{alt}[/cyan] "
+                    f"(found its key in your environment)[/dim]"
+                )
                 model = alt
 
     system = DEFAULT_SYSTEM_PROMPT
@@ -103,6 +105,7 @@ def _build_agent(model: str, workdir: str, confirm=None, api_base: str | None = 
     mcp_manager = None
     try:
         from opendot.mcp import MCPManager, load_mcp_config
+
         cfg = load_mcp_config()
         if cfg:
             mcp_manager = MCPManager(cfg)
@@ -125,8 +128,10 @@ def _cmd_log(workdir: str, clear: bool = False) -> None:
     rev = Reversibility(workdir=workdir, rules=load_rules(workdir))
     if clear:
         n = rev.clear_history()
-        console.print(f"[green]cleared[/green] {n} ledger entr{'y' if n == 1 else 'ies'} "
-                      "(undo history discarded)")
+        console.print(
+            f"[green]cleared[/green] {n} ledger entr{'y' if n == 1 else 'ies'} "
+            "(undo history discarded)"
+        )
         return
     entries = rev.history()
     if not entries:
@@ -159,12 +164,16 @@ def _cmd_undo(workdir: str, snap_id: str | None) -> None:
             console.print(f"[red]no action with id {snap_id}[/red]  (see: opendot log)")
             return
         changed_locks = rev.restore_to(target.snapshot_before)
-        console.print(f"[green]restored[/green] workspace to before action {snap_id} ({target.kind}: {target.detail[:50]})")
+        console.print(
+            f"[green]restored[/green] workspace to before action {snap_id} ({target.kind}: {target.detail[:50]})"
+        )
         _note_lockfiles(console, changed_locks)
     else:
         undone = rev.undo_last()
         if undone is None:
-            console.print("[yellow]nothing to undo[/yellow] (or the last action wasn't snapshotted)")
+            console.print(
+                "[yellow]nothing to undo[/yellow] (or the last action wasn't snapshotted)"
+            )
             return
         console.print(f"[green]undid[/green] last action ({undone.kind}: {undone.detail[:50]})")
         _note_lockfiles(console, rev.last_changed_lockfiles)
@@ -187,7 +196,9 @@ def _note_lockfiles(console, changed: list[str]) -> None:
 def _cmd_mcp(args) -> None:
     """`opendot mcp add|list|remove` — manage external MCP servers."""
     from opendot.mcp import (
-        add_mcp_server, load_mcp_config, remove_mcp_server,
+        add_mcp_server,
+        load_mcp_config,
+        remove_mcp_server,
     )
 
     cmd = getattr(args, "mcp_command", None)
@@ -196,7 +207,9 @@ def _cmd_mcp(args) -> None:
         servers = load_mcp_config()
         if not servers:
             console.print("[dim]no MCP servers configured.[/dim]")
-            console.print("[dim]add one:  opendot mcp add <name> -- <command> [args...]   (or --url <url>)[/dim]")
+            console.print(
+                "[dim]add one:  opendot mcp add <name> -- <command> [args...]   (or --url <url>)[/dim]"
+            )
             return
         console.print("[bold]MCP servers[/bold] (from ~/.opendot/mcp.json)\n")
         for name, spec in servers.items():
@@ -225,7 +238,9 @@ def _cmd_mcp(args) -> None:
         else:
             cmd = list(getattr(args, "post_dashdash", []))
             if not cmd:
-                console.print("[red]provide a launch command after `--`, or use --url for a remote server[/red]")
+                console.print(
+                    "[red]provide a launch command after `--`, or use --url for a remote server[/red]"
+                )
                 return
             spec = {"command": cmd[0]}
             if len(cmd) > 1:
@@ -233,7 +248,9 @@ def _cmd_mcp(args) -> None:
         if env:
             spec["env"] = env
         add_mcp_server(args.name, spec)
-        console.print(f"[green]added[/green] MCP server [cyan]{args.name}[/cyan]. It will connect next time you run opendot.")
+        console.print(
+            f"[green]added[/green] MCP server [cyan]{args.name}[/cyan]. It will connect next time you run opendot."
+        )
         return
 
     if cmd == "remove":
@@ -331,19 +348,25 @@ def _interactive(agent: Agent) -> None:
                 console.print(f"model → [cyan]{agent.config.model}[/cyan]")
                 _warn_if_missing_key(agent.config.model)
             else:
-                console.print(f"model: [cyan]{agent.config.model}[/cyan]  "
-                              "([dim]/model <id> to change[/dim])")
+                console.print(
+                    f"model: [cyan]{agent.config.model}[/cyan]  ([dim]/model <id> to change[/dim])"
+                )
             continue
         if low.startswith("/provider") or low.startswith("/connect"):
             from opendot.providers import register_key
+
             parts = text.split()
             if len(parts) == 3:
                 register_key(parts[1], parts[2])
-                console.print(f"[green]✓[/green] set {parts[1]} for this session — "
-                              f"persist with [dim]export {parts[1]}=…[/dim]")
+                console.print(
+                    f"[green]✓[/green] set {parts[1]} for this session — "
+                    f"persist with [dim]export {parts[1]}=…[/dim]"
+                )
             else:
-                console.print("usage: [dim]/provider <ENV_VAR> <api-key>[/dim]  "
-                              "(the TUI has an interactive picker)")
+                console.print(
+                    "usage: [dim]/provider <ENV_VAR> <api-key>[/dim]  "
+                    "(the TUI has an interactive picker)"
+                )
             continue
         if low == "/log":
             _cmd_log(agent.config.workdir)
@@ -369,27 +392,42 @@ def main() -> None:
     argv = sys.argv[1:]
     if "--" in argv:
         i = argv.index("--")
-        argv, post_dashdash = argv[:i], argv[i + 1:]
+        argv, post_dashdash = argv[:i], argv[i + 1 :]
 
     parser = argparse.ArgumentParser(
         prog="opendot",
         description="An interactive terminal AI agent you can fully undo.",
     )
     parser.add_argument("-p", "--prompt", help="Run a single task and exit (one-shot mode).")
-    parser.add_argument("--model", default=os.environ.get("OPENDOT_MODEL", "gpt-5.1"),
-                        help="Model id (any LiteLLM model, e.g. gpt-5.1, claude-opus-4-5, ollama/qwen3).")
-    parser.add_argument("--api-base", default=os.environ.get("OPENAI_API_BASE"),
-                        help="Base URL of an OpenAI-compatible server "
-                             "(llama.cpp/llama-server, vLLM, LM Studio). "
-                             "Use with --model openai/<name>.")
-    parser.add_argument("-C", "--dir", default=os.getcwd(), help="Working directory (default: cwd).")
-    parser.add_argument("--repl", action="store_true", help="Use the plain REPL instead of the full-screen TUI.")
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("OPENDOT_MODEL", "gpt-5.1"),
+        help="Model id (any LiteLLM model, e.g. gpt-5.1, claude-opus-4-5, ollama/qwen3).",
+    )
+    parser.add_argument(
+        "--api-base",
+        default=os.environ.get("OPENAI_API_BASE"),
+        help="Base URL of an OpenAI-compatible server "
+        "(llama.cpp/llama-server, vLLM, LM Studio). "
+        "Use with --model openai/<name>.",
+    )
+    parser.add_argument(
+        "-C", "--dir", default=os.getcwd(), help="Working directory (default: cwd)."
+    )
+    parser.add_argument(
+        "--repl",
+        action="store_true",
+        help="Use the plain REPL instead of the full-screen TUI.",
+    )
     parser.add_argument("--version", action="version", version=f"opendot {__version__}")
 
     sub = parser.add_subparsers(dest="command")
     p_log = sub.add_parser("log", help="Show the auditable history of actions opendot took.")
-    p_log.add_argument("--clear", action="store_true",
-                       help="Wipe this project's action ledger (discards undo history).")
+    p_log.add_argument(
+        "--clear",
+        action="store_true",
+        help="Wipe this project's action ledger (discards undo history).",
+    )
     p_undo = sub.add_parser("undo", help="Restore the workspace (last action, or to a given id).")
     p_undo.add_argument("id", nargs="?", help="Action id from `opendot log` (default: last).")
 
@@ -397,17 +435,28 @@ def main() -> None:
     p_mcp = sub.add_parser("mcp", help="Manage MCP servers opendot connects to.")
     mcp_sub = p_mcp.add_subparsers(dest="mcp_command")
     p_add = mcp_sub.add_parser(
-        "add", help="Add an MCP server.",
+        "add",
+        help="Add an MCP server.",
         epilog="For a stdio server, put its launch command after `--`. "
-               "For a remote server, pass --url instead.",
+        "For a remote server, pass --url instead.",
     )
     p_add.add_argument("name", help="A short name for the server.")
     p_add.add_argument("--url", help="A remote MCP server URL (http/sse) instead of a command.")
-    p_add.add_argument("--env", action="append", default=[], metavar="KEY=VAL",
-                       help="Environment variable for the server (repeatable).")
-    p_add.add_argument("--header", action="append", default=[], metavar="KEY=VAL",
-                       help="HTTP header for a remote (--url) server, e.g. "
-                            "'Authorization=Bearer <token>' (repeatable).")
+    p_add.add_argument(
+        "--env",
+        action="append",
+        default=[],
+        metavar="KEY=VAL",
+        help="Environment variable for the server (repeatable).",
+    )
+    p_add.add_argument(
+        "--header",
+        action="append",
+        default=[],
+        metavar="KEY=VAL",
+        help="HTTP header for a remote (--url) server, e.g. "
+        "'Authorization=Bearer <token>' (repeatable).",
+    )
     # The launch command (after `--`) is captured from argv in main(), not here,
     # so its own flags (e.g. -y) aren't parsed by argparse.
     mcp_sub.add_parser("list", help="List configured MCP servers.")

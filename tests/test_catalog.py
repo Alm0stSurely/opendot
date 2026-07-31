@@ -9,7 +9,6 @@ import pytest
 
 from opendot import catalog
 
-
 FAKE_MODEL_COST = {
     "sample_spec": {"mode": "chat", "litellm_provider": "openai"},
     "gpt-4o": {"mode": "chat", "litellm_provider": "openai"},
@@ -17,7 +16,10 @@ FAKE_MODEL_COST = {
     "whisper-1": {"mode": "audio_transcription", "litellm_provider": "openai"},
     # bare key (as LiteLLM's registry actually stores it) — must get prefixed
     "deepseek-chat": {"mode": "chat", "litellm_provider": "deepseek"},
-    "obscure/model": {"mode": "chat", "litellm_provider": "obscureproxy"},  # not routable
+    "obscure/model": {
+        "mode": "chat",
+        "litellm_provider": "obscureproxy",
+    },  # not routable
 }
 
 
@@ -40,8 +42,8 @@ def test_list_models_text_only():
     # other providers get prefixed so they're routable.
     assert "gpt-4o" in models
     assert "deepseek/deepseek-chat" in models
-    assert "dall-e-3" not in models        # image
-    assert "whisper-1" not in models       # audio
+    assert "dall-e-3" not in models  # image
+    assert "whisper-1" not in models  # audio
     assert "sample_spec" not in models
 
 
@@ -50,14 +52,14 @@ def test_bare_provider_model_is_prefixed_for_routing():
     deepseek) must be returned prefixed, or auto-switch produces an unroutable
     'LLM Provider NOT provided' string. openai/anthropic stay bare."""
     by_name = {m["name"]: m["model"] for m in catalog.list_models()}
-    assert by_name["gpt-4o"] == "gpt-4o"                # bare-ok provider, untouched
+    assert by_name["gpt-4o"] == "gpt-4o"  # bare-ok provider, untouched
     # a bare non-openai/anthropic key gets prefixed so it's routable
     assert by_name["deepseek-chat"] == "deepseek/deepseek-chat"
 
 
 def test_list_models_only_routable_providers():
     models = {m["model"] for m in catalog.list_models()}
-    assert "obscure/model" not in models   # provider not in provider_list
+    assert "obscure/model" not in models  # provider not in provider_list
 
 
 def test_list_providers():
@@ -74,6 +76,7 @@ def test_default_model_for_env():
 def test_unavailable_litellm_returns_empty(monkeypatch):
     def boom():
         raise ImportError("no litellm")
+
     monkeypatch.setattr(catalog, "_litellm", boom)
     assert catalog.list_models() == []
     assert catalog.list_providers() == []

@@ -10,10 +10,17 @@ Split across submodules for readability:
 
 from opendot.tui.app import OpendotTUI, run_tui
 from opendot.tui.modals import (
-    ApiKeyModal, ConfirmModal, McpAddModal, SearchListModal,
+    ApiKeyModal,
+    ConfirmModal,
+    McpAddModal,
+    SearchListModal,
 )
 
 __all__ = [
-    "OpendotTUI", "run_tui",
-    "ApiKeyModal", "ConfirmModal", "McpAddModal", "SearchListModal",
+    "OpendotTUI",
+    "run_tui",
+    "ApiKeyModal",
+    "ConfirmModal",
+    "McpAddModal",
+    "SearchListModal",
 ]

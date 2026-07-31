@@ -14,13 +14,14 @@ aren't installed, the tools aren't registered (see build_office_tools).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
 def office_available() -> bool:
     try:
         import openpyxl  # noqa: F401
         import pptx  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -40,14 +41,17 @@ def build_office_tools(box) -> list:
     # ---- xlsx ----
     def read_xlsx(path: str, sheet: str | None = None, max_rows: int = 100) -> str:
         import openpyxl
+
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
         wb = openpyxl.load_workbook(p, data_only=True)
         names = wb.sheetnames
         ws = wb[sheet] if sheet else wb[names[0]]
-        lines = [f"workbook {box._rel(p)}  sheets: {', '.join(names)}",
-                 f"sheet '{ws.title}'  ({ws.max_row} rows x {ws.max_column} cols)"]
+        lines = [
+            f"workbook {box._rel(p)}  sheets: {', '.join(names)}",
+            f"sheet '{ws.title}'  ({ws.max_row} rows x {ws.max_column} cols)",
+        ]
         for r, row in enumerate(ws.iter_rows(values_only=True), 1):
             if r > max_rows:
                 lines.append(f"... ({ws.max_row - max_rows} more rows)")
@@ -58,6 +62,7 @@ def build_office_tools(box) -> list:
 
     def edit_cell(path: str, cell: str, value: str, sheet: str | None = None) -> str:
         import openpyxl
+
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
@@ -82,20 +87,23 @@ def build_office_tools(box) -> list:
     # ---- pptx ----
     def read_pptx(path: str) -> str:
         from pptx import Presentation
+
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
         prs = Presentation(str(p))
         lines = [f"presentation {box._rel(p)}  ({len(prs.slides)} slides)"]
         for i, slide in enumerate(prs.slides, 1):
-            texts = [sh.text.strip() for sh in slide.shapes
-                     if sh.has_text_frame and sh.text.strip()]
+            texts = [
+                sh.text.strip() for sh in slide.shapes if sh.has_text_frame and sh.text.strip()
+            ]
             lines.append(f"— slide {i} —")
             lines.extend(f"   {t}" for t in texts)
         return _truncate("\n".join(lines))
 
     def edit_pptx_text(path: str, find: str, replace: str) -> str:
         from pptx import Presentation
+
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
@@ -117,16 +125,60 @@ def build_office_tools(box) -> list:
         return f"{box._rel(p)}: replaced {find!r} → {replace!r} in {hits} run(s)"
 
     return [
-        Tool("read_xlsx", "Read an .xlsx spreadsheet: lists sheets and prints a sheet's cells as rows.",
-             {"type": "object", "properties": {"path": {"type": "string"}, "sheet": {"type": "string"}, "max_rows": {"type": "integer"}}, "required": ["path"]},
-             read_xlsx),
-        Tool("edit_cell", "Set one cell in an .xlsx (e.g. cell 'B4'). Numbers/formulas handled. Undoable.",
-             {"type": "object", "properties": {"path": {"type": "string"}, "cell": {"type": "string", "description": "A1-style ref, e.g. 'B4'."}, "value": {"type": "string"}, "sheet": {"type": "string"}}, "required": ["path", "cell", "value"]},
-             edit_cell),
-        Tool("read_pptx", "Read a .pptx presentation: outputs each slide's text outline.",
-             {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
-             read_pptx),
-        Tool("edit_pptx_text", "Find-and-replace text across all slides of a .pptx. Undoable.",
-             {"type": "object", "properties": {"path": {"type": "string"}, "find": {"type": "string"}, "replace": {"type": "string"}}, "required": ["path", "find", "replace"]},
-             edit_pptx_text),
+        Tool(
+            "read_xlsx",
+            "Read an .xlsx spreadsheet: lists sheets and prints a sheet's cells as rows.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "sheet": {"type": "string"},
+                    "max_rows": {"type": "integer"},
+                },
+                "required": ["path"],
+            },
+            read_xlsx,
+        ),
+        Tool(
+            "edit_cell",
+            "Set one cell in an .xlsx (e.g. cell 'B4'). Numbers/formulas handled. Undoable.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "cell": {
+                        "type": "string",
+                        "description": "A1-style ref, e.g. 'B4'.",
+                    },
+                    "value": {"type": "string"},
+                    "sheet": {"type": "string"},
+                },
+                "required": ["path", "cell", "value"],
+            },
+            edit_cell,
+        ),
+        Tool(
+            "read_pptx",
+            "Read a .pptx presentation: outputs each slide's text outline.",
+            {
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            },
+            read_pptx,
+        ),
+        Tool(
+            "edit_pptx_text",
+            "Find-and-replace text across all slides of a .pptx. Undoable.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "find": {"type": "string"},
+                    "replace": {"type": "string"},
+                },
+                "required": ["path", "find", "replace"],
+            },
+            edit_pptx_text,
+        ),
     ]

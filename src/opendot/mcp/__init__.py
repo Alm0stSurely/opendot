@@ -9,6 +9,9 @@ from opendot.mcp.manager import (
 )
 
 __all__ = [
-    "MCPManager", "load_mcp_config", "save_mcp_config",
-    "add_mcp_server", "remove_mcp_server",
+    "MCPManager",
+    "load_mcp_config",
+    "save_mcp_config",
+    "add_mcp_server",
+    "remove_mcp_server",
 ]

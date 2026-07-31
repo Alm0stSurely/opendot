@@ -127,7 +127,7 @@ def _revoke_connections(slug: str) -> int:
     except Exception:  # noqa: BLE001
         return 0
     n = 0
-    for acc in (getattr(resp, "items", None) or []):
+    for acc in getattr(resp, "items", None) or []:
         acc_id = getattr(acc, "id", None) or getattr(acc, "nanoid", None)
         if not acc_id:
             continue
@@ -142,6 +142,7 @@ def _revoke_connections(slug: str) -> int:
 def composio_available() -> bool:
     try:
         import composio  # noqa: F401
+
         return True
     except Exception:  # noqa: BLE001
         return False
@@ -159,6 +160,7 @@ def _client():
 
 
 # ---- catalog / connection management (used by the /composio TUI flow) ----
+
 
 def list_apps(search: str | None = None, limit: int = 200) -> list[dict]:
     """Available Composio toolkits: [{slug, name, description}]. Empty on failure."""
@@ -216,9 +218,11 @@ def _friendly_error(exc: Exception) -> str:
     # A read-only key is the common one: it authenticates (apps list fine) but
     # can't create connections. Give the exact fix, not the JSON blob.
     if "InsufficientPermissions" in text or "write access" in text:
-        return ("your Composio API key is read-only — it can't connect apps. "
-                "Create a key with 'connected_accounts' write access in the "
-                "Composio dashboard, then run /composio to re-enter it.")
+        return (
+            "your Composio API key is read-only — it can't connect apps. "
+            "Create a key with 'connected_accounts' write access in the "
+            "Composio dashboard, then run /composio to re-enter it."
+        )
     # Prefer the actionable 'suggested_fix'; fall back to the human 'message'.
     for field in ("suggested_fix", "message"):
         m = re.search(rf"'{field}':\s*'([^']+)'", text)
@@ -261,7 +265,7 @@ def begin_connect(slug: str) -> ConnectResult:
 # execute). The agent discovers the specific tool it needs at runtime via those,
 # and we route calls through `session.execute()`. No cap, nothing truncated.
 
-_SESSION = None            # cached ToolRouterSession
+_SESSION = None  # cached ToolRouterSession
 _SESSION_APPS: tuple = ()  # the enabled-apps set the cached session was built for
 
 
@@ -312,14 +316,16 @@ def build_tool_specs() -> list[dict]:
             continue
         desc = fn.get("description", "") if isinstance(fn, dict) else getattr(fn, "description", "")
         params = fn.get("parameters", {}) if isinstance(fn, dict) else getattr(fn, "parameters", {})
-        specs.append({
-            "type": "function",
-            "function": {
-                "name": _spec_name(name),
-                "description": desc or f"Composio tool {name}",
-                "parameters": params or {"type": "object", "properties": {}},
-            },
-        })
+        specs.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": _spec_name(name),
+                    "description": desc or f"Composio tool {name}",
+                    "parameters": params or {"type": "object", "properties": {}},
+                },
+            }
+        )
     return specs
 
 
@@ -331,10 +337,18 @@ def is_composio_tool(name: str) -> bool:
 # failure (rate limit, bad args). Adapted from Plandot's detect.py. Matched
 # case-insensitively anywhere in the tool output.
 _AUTH_PHRASES = (
-    "not connected", "no active connection", "no connection",
-    "authentication required", "authorization required", "please authorize",
-    "please connect", "not authenticated", "unauthorized", "connect your",
-    "requires authentication", "needs to be connected",
+    "not connected",
+    "no active connection",
+    "no connection",
+    "authentication required",
+    "authorization required",
+    "please authorize",
+    "please connect",
+    "not authenticated",
+    "unauthorized",
+    "connect your",
+    "requires authentication",
+    "needs to be connected",
 )
 
 
@@ -348,7 +362,7 @@ def looks_like_auth_error(text: str) -> bool:
 def execute_tool(name: str, arguments: dict) -> str:
     """Run a Composio Tool Router meta-tool. ``name`` is ``composio__<tool>``;
     execution goes through the session so discovery/scoping is honored."""
-    tool_slug = name[len("composio__"):]
+    tool_slug = name[len("composio__") :]
     session = _session()
     if session is None:
         return "error: Composio session unavailable (not configured?)"
@@ -366,6 +380,8 @@ def execute_tool(name: str, arguments: dict) -> str:
     # If the failure is an auth/connection problem, tell the user how to fix it
     # (connect the app) instead of surfacing a raw "not connected" error.
     if looks_like_auth_error(out):
-        out += ("\n\n[opendot] This looks like an unconnected app — run /composio "
-                "to connect it, then retry.")
+        out += (
+            "\n\n[opendot] This looks like an unconnected app — run /composio "
+            "to connect it, then retry."
+        )
     return out

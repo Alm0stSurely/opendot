@@ -17,7 +17,6 @@ from opendot.agent.events import Event
 from opendot.agent.prompt import DEFAULT_SYSTEM_PROMPT
 from opendot.tools.local import Toolbox
 
-
 _SPAWN_EXPLORERS_SPEC = {
     "type": "function",
     "function": {
@@ -33,7 +32,8 @@ _SPAWN_EXPLORERS_SPEC = {
             "type": "object",
             "properties": {
                 "tasks": {
-                    "type": "array", "items": {"type": "string"},
+                    "type": "array",
+                    "items": {"type": "string"},
                     "description": "2-6 independent, self-contained investigation tasks.",
                 }
             },
@@ -59,16 +59,18 @@ def _assistant_msg(content: str, calls: list[dict[str, Any]]) -> dict[str, Any]:
     msg: dict[str, Any] = {"role": "assistant", "content": content or None}
     if calls:
         msg["tool_calls"] = [
-            {"id": c["id"], "type": "function",
-             "function": {"name": c["name"], "arguments": c["args"] or "{}"}}
+            {
+                "id": c["id"],
+                "type": "function",
+                "function": {"name": c["name"], "arguments": c["args"] or "{}"},
+            }
             for c in calls
         ]
     return msg
 
 
 class Agent:
-    def __init__(self, config: AgentConfig | None = None, confirm=None,
-                 mcp_manager=None) -> None:
+    def __init__(self, config: AgentConfig | None = None, confirm=None, mcp_manager=None) -> None:
         self.config = config or AgentConfig()
         self.mcp = mcp_manager
 
@@ -175,7 +177,8 @@ class Agent:
 
                     result = "(no findings)"
                     async for ev in run_explorers(
-                        args.get("tasks", []), model=self.config.model,
+                        args.get("tasks", []),
+                        model=self.config.model,
                         workdir=self.config.workdir,
                     ):
                         if ev.type == "tool_end" and ev.tool == "spawn_explorers":
@@ -192,11 +195,10 @@ class Agent:
                 # a confirm-callback safely block for a UI prompt (e.g. the TUI
                 # modal) without freezing the loop.
                 import asyncio
+
                 result = await asyncio.to_thread(self.toolbox.call, name, args)
                 yield Event("tool_end", tool=name, result=result)
-                self.messages.append(
-                    {"role": "tool", "tool_call_id": call_id, "content": result}
-                )
+                self.messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
 
         yield Event("error", text=f"stopped: hit max_steps ({self.config.max_steps})")
 
@@ -207,8 +209,11 @@ class Agent:
         tool calls as plain text (so the caller can fall back to non-streaming).
         """
         stream = await litellm.acompletion(
-            model=self.config.model, messages=self.messages, tools=tools,
-            temperature=self.config.temperature, stream=True,
+            model=self.config.model,
+            messages=self.messages,
+            tools=tools,
+            temperature=self.config.temperature,
+            stream=True,
             stream_options={"include_usage": True},
             api_base=self.config.api_base,  # None => provider default
         )
@@ -245,23 +250,30 @@ class Agent:
 
         calls = [
             {"id": c["id"] or f"call_{i}", "name": c["name"], "args": c["args"]}
-            for i, c in sorted(tool_calls.items()) if c["name"]
+            for i, c in sorted(tool_calls.items())
+            if c["name"]
         ]
         yield _Assembled(_assistant_msg("".join(content_parts), calls), calls)
 
     async def _nonstream_turn(self, litellm, tools):
         """Non-streaming fallback (reliable tool calls; no live tokens)."""
         resp = await litellm.acompletion(
-            model=self.config.model, messages=self.messages, tools=tools,
-            temperature=self.config.temperature, stream=False,
+            model=self.config.model,
+            messages=self.messages,
+            tools=tools,
+            temperature=self.config.temperature,
+            stream=False,
             api_base=self.config.api_base,  # None => provider default
         )
         self.usage.add_response(resp, litellm, model=self.config.model)
         msg = resp.choices[0].message
         raw = getattr(msg, "tool_calls", None) or []
         calls = [
-            {"id": tc.id or f"call_{i}", "name": tc.function.name,
-             "args": tc.function.arguments or "{}"}
+            {
+                "id": tc.id or f"call_{i}",
+                "name": tc.function.name,
+                "args": tc.function.arguments or "{}",
+            }
             for i, tc in enumerate(raw)
         ]
         if msg.content:

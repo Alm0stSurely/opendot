@@ -30,7 +30,7 @@ import asyncio
 import json
 import threading
 from concurrent.futures import Future
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -80,7 +80,7 @@ def remove_mcp_server(name: str) -> bool:
 @dataclass
 class MCPTool:
     server: str
-    name: str            # bare tool name on the server
+    name: str  # bare tool name on the server
     description: str
     input_schema: dict[str, Any]
 
@@ -124,23 +124,25 @@ class MCPManager:
         from contextlib import AsyncExitStack
 
         from mcp import ClientSession
+
         self._stack = AsyncExitStack()
         for name, spec in self.config.items():
             try:
                 read, write = await self._open_transport(spec)
-                session = await self._stack.enter_async_context(
-                    ClientSession(read, write)
-                )
+                session = await self._stack.enter_async_context(ClientSession(read, write))
                 await session.initialize()
                 self._sessions[name] = session
                 self.connected.append(name)
                 resp = await session.list_tools()
                 for t in resp.tools:
-                    self.tools.append(MCPTool(
-                        server=name, name=t.name,
-                        description=t.description or "",
-                        input_schema=t.inputSchema or {"type": "object", "properties": {}},
-                    ))
+                    self.tools.append(
+                        MCPTool(
+                            server=name,
+                            name=t.name,
+                            description=t.description or "",
+                            input_schema=t.inputSchema or {"type": "object", "properties": {}},
+                        )
+                    )
             except Exception as exc:  # noqa: BLE001 - a bad server must not kill the rest
                 self.errors[name] = f"{type(exc).__name__}: {exc}"
         ready.set()
@@ -152,14 +154,20 @@ class MCPManager:
             headers = spec.get("headers") or None  # e.g. {"Authorization": "Bearer ..."}
             if url.rstrip("/").endswith("/sse"):
                 from mcp.client.sse import sse_client
+
                 return (await self._stack.enter_async_context(sse_client(url, headers=headers)))[:2]
             from mcp.client.streamable_http import streamablehttp_client
-            return (await self._stack.enter_async_context(streamablehttp_client(url, headers=headers)))[:2]
+
+            return (
+                await self._stack.enter_async_context(streamablehttp_client(url, headers=headers))
+            )[:2]
         # stdio
         from mcp import StdioServerParameters
         from mcp.client.stdio import stdio_client
+
         params = StdioServerParameters(
-            command=spec["command"], args=spec.get("args", []),
+            command=spec["command"],
+            args=spec.get("args", []),
             env=spec.get("env") or None,
         )
         return await self._stack.enter_async_context(stdio_client(params))
@@ -195,9 +203,11 @@ class MCPManager:
 
     def shutdown(self) -> None:
         if self._loop and self._loop.is_running():
+
             async def _close():
                 if self._stack:
                     await self._stack.aclose()
+
             try:
                 self._run(_close(), timeout=10)
             except Exception:  # noqa: BLE001

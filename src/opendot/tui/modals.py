@@ -10,7 +10,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
 
-from opendot.tui.helpers import _title_bar, _row_bar
+from opendot.tui.helpers import _row_bar, _title_bar
 
 
 class ConfirmModal(ModalScreen[bool]):
@@ -31,10 +31,13 @@ class ConfirmModal(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="box"):
-            yield Static(Text.assemble(
-                ("⚠ irreversible action\n\n", "bold yellow"),
-                (self._prompt, ""),
-            ), id="q")
+            yield Static(
+                Text.assemble(
+                    ("⚠ irreversible action\n\n", "bold yellow"),
+                    (self._prompt, ""),
+                ),
+                id="q",
+            )
             with Horizontal(id="buttons"):
                 yield Button("Run it", variant="error", id="yes")
                 yield Button("Skip", variant="primary", id="no")
@@ -93,7 +96,7 @@ class SearchListModal(ModalScreen[str | None]):
         ol.clear_options()
         last_group = None
         self._values: list[str] = []
-        row_index = 0          # index into the OptionList (headers included)
+        row_index = 0  # index into the OptionList (headers included)
         first_selectable = None  # index of the first non-disabled (data) row
         for item in self._items:
             value, label, group = item[0], item[1], item[2]
@@ -202,7 +205,10 @@ class McpAddModal(ModalScreen[dict | None]):
         with Vertical(id="box"):
             yield Static(_title_bar("Add an MCP server"), id="title")
             yield Input(placeholder="name (e.g. github, supabase)", id="name")
-            yield Input(placeholder="https://…/mcp   OR   npx -y @scope/server args…", id="target")
+            yield Input(
+                placeholder="https://…/mcp   OR   npx -y @scope/server args…",
+                id="target",
+            )
             yield Input(placeholder="Authorization header (remote only, optional)", id="header")
             yield Static(
                 "enter submit · a value starting with http(s):// is treated as a remote URL",

@@ -4,19 +4,21 @@ and the app can import from here."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from rich.text import Text
-
 # Pre-warm textual-image's terminal capability probe at import time — i.e. BEFORE
 # the Textual app puts the terminal in raw mode and focuses the input. The probe
 # sends a Device Attributes query ("\e[c") and reads the reply; if it runs later
 # (lazily during compose), that reply ("^[?1;2c") leaks into the focused input.
 # Guarded to a real TTY so it never hangs in tests / piped / one-shot mode.
 import sys as _sys
+from pathlib import Path
+
+from rich.text import Text
+
 try:
     if _sys.stdin.isatty() and _sys.stdout.isatty():
-        from textual_image.widget import Image as _ProbeImage  # noqa: F401 - import triggers the probe
+        from textual_image.widget import (
+            Image as _ProbeImage,  # noqa: F401 - import triggers the probe
+        )
 except Exception:  # noqa: BLE001 - probe/import failure must never block startup
     pass
 

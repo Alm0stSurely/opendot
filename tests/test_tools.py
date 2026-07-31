@@ -1,13 +1,10 @@
 """Tests for the coding tools (grep, glob, edit) and that edit is undoable."""
 
-import os
-from pathlib import Path
-
 import pytest
 
-from opendot.tools.local import Toolbox
 from opendot.reversibility.engine import Reversibility
 from opendot.reversibility.snapshots import IgnoreRules
+from opendot.tools.local import Toolbox
 
 
 @pytest.fixture(autouse=True)
@@ -73,4 +70,12 @@ def test_edit_is_undoable(tmp_path):
 def test_new_tools_are_in_specs(tmp_path):
     tb, _, _ = _tb(tmp_path)
     names = {s["function"]["name"] for s in tb.specs()}
-    assert {"grep", "glob", "edit", "run_shell", "read_file", "write_file", "list_files"} <= names
+    assert {
+        "grep",
+        "glob",
+        "edit",
+        "run_shell",
+        "read_file",
+        "write_file",
+        "list_files",
+    } <= names

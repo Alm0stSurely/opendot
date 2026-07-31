@@ -25,10 +25,15 @@ def _unified_diff(old: str, new: str, path: str, max_lines: int = 200) -> str:
     opendot shows what it changed (not just 'wrote N chars') — that transparency
     is the point. The TUI colors +/- lines; the model reads the same text.
     """
-    diff = list(difflib.unified_diff(
-        old.splitlines(), new.splitlines(),
-        fromfile=f"a/{path}", tofile=f"b/{path}", lineterm="",
-    ))
+    diff = list(
+        difflib.unified_diff(
+            old.splitlines(),
+            new.splitlines(),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+            lineterm="",
+        )
+    )
     if not diff:
         return "(no change)"
     if len(diff) > max_lines:
@@ -73,8 +78,14 @@ class Toolbox:
     #: tools that only observe — never mutate the filesystem or run commands.
     READ_ONLY = {"list_files", "read_file", "grep", "glob", "read_xlsx", "read_pptx"}
 
-    def __init__(self, workdir: str, reversibility=None, confirm=None,
-                 read_only: bool = False, mcp_manager=None) -> None:
+    def __init__(
+        self,
+        workdir: str,
+        reversibility=None,
+        confirm=None,
+        read_only: bool = False,
+        mcp_manager=None,
+    ) -> None:
         self.workdir = Path(workdir).resolve()
         self.rev = reversibility
         self._confirm = confirm or (lambda prompt: True)
@@ -83,6 +94,7 @@ class Toolbox:
         tools = self._build()
         # Office tools (.xlsx/.pptx) only when the optional deps are installed.
         from opendot.tools.office import build_office_tools
+
         tools += build_office_tools(self)
         if read_only:
             tools = [t for t in tools if t.name in self.READ_ONLY]
@@ -114,7 +126,6 @@ class Toolbox:
 
     def _walk_files(self, base: Path):
         """Yield files under base, skipping ignored dirs (for grep)."""
-        import os
         for dirpath, dirnames, filenames in os.walk(base):
             dirnames[:] = [d for d in dirnames if d not in self._IGNORE]
             for fn in filenames:
@@ -130,7 +141,10 @@ class Toolbox:
                 return str(base)
             entries = []
             for e in sorted(base.iterdir()):
-                if e.name.startswith(".git") or e.name in {"node_modules", "__pycache__"}:
+                if e.name.startswith(".git") or e.name in {
+                    "node_modules",
+                    "__pycache__",
+                }:
                     continue
                 entries.append(e.name + ("/" if e.is_dir() else ""))
             return _truncate("\n".join(entries) or "(empty)")
@@ -175,7 +189,7 @@ class Toolbox:
             for prefix in ("OPENDOT_NO_SNAPSHOT=1 ", "OPENDOT_NO_SNAPSHOT=true "):
                 if stripped.startswith(prefix):
                     no_snapshot = True
-                    command = stripped[len(prefix):]
+                    command = stripped[len(prefix) :]
                     break
 
             # Classify the command: safe/contained vs. irreversible/escaping.
@@ -184,8 +198,7 @@ class Toolbox:
             verdict = classify(command, str(self.workdir))
             if not verdict.reversible:
                 ok = self._confirm(
-                    f"This command may not be undoable ({verdict.reason}):\n"
-                    f"  {command}\nRun it?"
+                    f"This command may not be undoable ({verdict.reason}):\n  {command}\nRun it?"
                 )
                 if not ok:
                     return "skipped: user declined an irreversible command"
@@ -195,13 +208,17 @@ class Toolbox:
             if self.rev is not None:
                 if no_snapshot:
                     self.rev.before_action(
-                        "shell", command, snapshot=False,
+                        "shell",
+                        command,
+                        snapshot=False,
                         note="snapshot skipped (OPENDOT_NO_SNAPSHOT) — not undoable",
                     )
                 else:
                     self.rev.before_action(
-                        "shell", command,
-                        reversible=verdict.reversible, note=verdict.reason,
+                        "shell",
+                        command,
+                        reversible=verdict.reversible,
+                        note=verdict.reason,
                     )
             try:
                 proc = subprocess.run(
@@ -227,6 +244,7 @@ class Toolbox:
         def grep(pattern: str, path: str = ".", max_matches: int = 100) -> str:
             """Search file contents for a regex, returning path:line:text matches."""
             import re
+
             base = self._resolve(path)
             try:
                 rx = re.compile(pattern)
@@ -236,12 +254,16 @@ class Toolbox:
             roots = [base] if base.is_file() else self._walk_files(base)
             for f in roots:
                 try:
-                    for i, line in enumerate(f.read_text(encoding="utf-8", errors="ignore").splitlines(), 1):
+                    for i, line in enumerate(
+                        f.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
+                    ):
                         if rx.search(line):
                             rel = f.relative_to(self.workdir)
                             hits.append(f"{rel}:{i}:{line.strip()[:200]}")
                             if len(hits) >= max_matches:
-                                return _truncate("\n".join(hits) + f"\n... (capped at {max_matches})")
+                                return _truncate(
+                                    "\n".join(hits) + f"\n... (capped at {max_matches})"
+                                )
                 except OSError:
                     continue
             return _truncate("\n".join(hits)) if hits else "no matches"
@@ -249,8 +271,11 @@ class Toolbox:
         def glob(pattern: str) -> str:
             """Find files matching a glob pattern (e.g. '**/*.py')."""
             base = self.workdir
-            matches = [str(p.relative_to(base)) for p in base.glob(pattern)
-                       if p.is_file() and not self._is_ignored(p)]
+            matches = [
+                str(p.relative_to(base))
+                for p in base.glob(pattern)
+                if p.is_file() and not self._is_ignored(p)
+            ]
             return _truncate("\n".join(sorted(matches))) if matches else "no files match"
 
         def edit(path: str, find: str, replace: str, count: int = 0) -> str:
@@ -274,43 +299,108 @@ class Toolbox:
             p.write_text(new, encoding="utf-8")
             replaced = n if count == 0 else min(n, count)
             rel = self._rel(p)
-            return (f"edited {rel} ({replaced} replacement(s))\n"
-                    + _unified_diff(text, new, rel))
+            return f"edited {rel} ({replaced} replacement(s))\n" + _unified_diff(text, new, rel)
 
         return [
             Tool(
-                "list_files", "List files and directories at a path (relative to the working dir).",
-                {"type": "object", "properties": {"path": {"type": "string", "description": "Path to list; defaults to '.'."}}},
+                "list_files",
+                "List files and directories at a path (relative to the working dir).",
+                {
+                    "type": "object",
+                    "properties": {
+                        "path": {
+                            "type": "string",
+                            "description": "Path to list; defaults to '.'.",
+                        }
+                    },
+                },
                 list_files,
             ),
             Tool(
-                "read_file", "Read a text file's contents.",
-                {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+                "read_file",
+                "Read a text file's contents.",
+                {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
                 read_file,
             ),
             Tool(
-                "write_file", "Create or overwrite a file with the given content.",
-                {"type": "object", "properties": {"path": {"type": "string"}, "content": {"type": "string"}}, "required": ["path", "content"]},
+                "write_file",
+                "Create or overwrite a file with the given content.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "content": {"type": "string"},
+                    },
+                    "required": ["path", "content"],
+                },
                 write_file,
             ),
             Tool(
-                "run_shell", "Run a shell command in the working directory (npm, git, build, mv, cp, etc.).",
-                {"type": "object", "properties": {"command": {"type": "string"}, "timeout": {"type": "integer", "description": "Seconds before timeout (default 120)."}}, "required": ["command"]},
+                "run_shell",
+                "Run a shell command in the working directory (npm, git, build, mv, cp, etc.).",
+                {
+                    "type": "object",
+                    "properties": {
+                        "command": {"type": "string"},
+                        "timeout": {
+                            "type": "integer",
+                            "description": "Seconds before timeout (default 120).",
+                        },
+                    },
+                    "required": ["command"],
+                },
                 run_shell,
             ),
             Tool(
-                "grep", "Search file contents for a regular expression. Returns path:line:text matches.",
-                {"type": "object", "properties": {"pattern": {"type": "string"}, "path": {"type": "string", "description": "Dir or file to search (default '.')."}, "max_matches": {"type": "integer"}}, "required": ["pattern"]},
+                "grep",
+                "Search file contents for a regular expression. Returns path:line:text matches.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "pattern": {"type": "string"},
+                        "path": {
+                            "type": "string",
+                            "description": "Dir or file to search (default '.').",
+                        },
+                        "max_matches": {"type": "integer"},
+                    },
+                    "required": ["pattern"],
+                },
                 grep,
             ),
             Tool(
-                "glob", "Find files matching a glob pattern, e.g. '**/*.py' or 'src/*.ts'.",
-                {"type": "object", "properties": {"pattern": {"type": "string"}}, "required": ["pattern"]},
+                "glob",
+                "Find files matching a glob pattern, e.g. '**/*.py' or 'src/*.ts'.",
+                {
+                    "type": "object",
+                    "properties": {"pattern": {"type": "string"}},
+                    "required": ["pattern"],
+                },
                 glob,
             ),
             Tool(
-                "edit", "Make a targeted find-and-replace edit in a file (surgical, undoable). Prefer this over rewriting whole files.",
-                {"type": "object", "properties": {"path": {"type": "string"}, "find": {"type": "string", "description": "Exact text to find."}, "replace": {"type": "string"}, "count": {"type": "integer", "description": "Max replacements; 0 = all (default)."}}, "required": ["path", "find", "replace"]},
+                "edit",
+                "Make a targeted find-and-replace edit in a file (surgical, undoable). Prefer this over rewriting whole files.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "path": {"type": "string"},
+                        "find": {
+                            "type": "string",
+                            "description": "Exact text to find.",
+                        },
+                        "replace": {"type": "string"},
+                        "count": {
+                            "type": "integer",
+                            "description": "Max replacements; 0 = all (default).",
+                        },
+                    },
+                    "required": ["path", "find", "replace"],
+                },
                 edit,
             ),
         ]
@@ -319,24 +409,28 @@ class Toolbox:
         specs = [t.spec() for t in self._tools.values()]
         # External MCP tools, namespaced mcp__server__tool.
         for mt in self._mcp_tools.values():
-            specs.append({
-                "type": "function",
-                "function": {
-                    "name": mt.qualified,
-                    "description": f"[MCP:{mt.server}] {mt.description}",
-                    "parameters": mt.input_schema,
-                },
-            })
+            specs.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": mt.qualified,
+                        "description": f"[MCP:{mt.server}] {mt.description}",
+                        "parameters": mt.input_schema,
+                    },
+                }
+            )
         # External Composio tools — the Tool Router keeps this a small, bounded
         # meta-tool set, so we don't need a total-count cap here.
         if not self.read_only:
             from opendot.tools import composio as composio_tools
+
             specs.extend(composio_tools.build_tool_specs())
         return specs
 
     def call(self, name: str, args: dict[str, Any]) -> str:
         # Composio tools are external + opaque like MCP: confirm + mark irreversible.
         from opendot.tools import composio as composio_tools
+
         if composio_tools.is_composio_tool(name):
             reason = "external Composio tool — opendot cannot undo it"
             if not self._confirm(f"Run {name}?  {reason}"):

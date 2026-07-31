@@ -16,6 +16,7 @@ def _rev(cmd):
 
 # --- should be flagged irreversible (needs confirm) ---
 
+
 def test_sudo_flagged():
     assert not _rev("sudo rm -rf /var")
 
@@ -76,6 +77,7 @@ def test_unknown_command_fails_safe():
 
 # --- should be allowed (reversible via snapshot / read-only) ---
 
+
 def test_readonly_allowed():
     assert _rev("ls -la")
     assert _rev("cat file.py")
@@ -87,7 +89,7 @@ def test_inworkspace_mutations_allowed():
     assert _rev("touch new.txt")
     assert _rev("mkdir subdir")
     assert _rev("echo hi > out.txt")
-    assert _rev("rm old.txt")            # in-workspace rm: snapshot covers it
+    assert _rev("rm old.txt")  # in-workspace rm: snapshot covers it
     assert _rev("python script.py")
 
 

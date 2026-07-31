@@ -12,8 +12,14 @@ from opendot import providers as p
 
 
 def _clear_keys(monkeypatch):
-    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
-                "DEEPSEEK_API_KEY", "GROQ_API_KEY", "MISTRAL_API_KEY"):
+    for var in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "GROQ_API_KEY",
+        "MISTRAL_API_KEY",
+    ):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -23,6 +29,7 @@ def fake_catalog(monkeypatch):
     var's provider, so model_for_available_key tests don't depend on the live
     LiteLLM registry."""
     from opendot import catalog
+
     mapping = {
         "OPENAI_API_KEY": "gpt-x",
         "DEEPSEEK_API_KEY": "deepseek/deepseek-x",
