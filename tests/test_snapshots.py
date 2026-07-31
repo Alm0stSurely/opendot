@@ -303,6 +303,57 @@ def test_ledger_clear_wipes_history(tmp_path):
     assert rev.clear_history() == 0
 
 
+def test_undo_reports_changed_lockfile(tmp_path):
+    """Undoing across a lockfile change must report it, so the caller can warn
+    that the environment isn't restored (only the declared versions)."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    (wd / "package-lock.json").write_text('{"version": 1}')
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+
+    rev.before_action("shell", "npm install foo", reversible=True)  # snapshot before
+    (wd / "package-lock.json").write_text('{"version": 2}')          # "install" changes it
+
+    undone = rev.undo_last()
+    assert undone is not None
+    assert (wd / "package-lock.json").read_text() == '{"version": 1}'  # rolled back
+    assert rev.last_changed_lockfiles == ["package-lock.json"]         # and reported
+
+
+def test_undo_reports_lockfile_created_by_install(tmp_path):
+    """A lockfile the install *created* (absent in the snapshot) is removed by
+    undo, and that also counts as a changed lockfile worth warning about."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    (wd / "app.py").write_text("x = 1")
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+
+    rev.before_action("shell", "uv add requests", reversible=True)   # no lockfile yet
+    (wd / "uv.lock").write_text("locked")                            # install creates one
+
+    rev.undo_last()
+    assert not (wd / "uv.lock").exists()                             # removed on undo
+    assert rev.last_changed_lockfiles == ["uv.lock"]
+
+
+def test_undo_no_lockfile_change_is_silent(tmp_path):
+    """A plain file edit with no lockfile involved reports nothing to warn about."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    (wd / "a.txt").write_text("v1")
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+    rev.before_action("write", "a.txt", reversible=True)
+    (wd / "a.txt").write_text("v2")
+    rev.undo_last()
+    assert rev.last_changed_lockfiles == []
+
+
 def test_no_snapshot_action_logs_but_captures_nothing(tmp_path):
     """OPENDOT_NO_SNAPSHOT path: the action is logged (audit trail) but no
     snapshot is taken, so nothing sensitive is copied into the store."""

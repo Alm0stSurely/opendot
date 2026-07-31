@@ -13,7 +13,7 @@ module just records the ``reversible`` flag it's given.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from opendot.reversibility import ledger, snapshots
 from opendot.reversibility.ledger import ActionKind, LedgerEntry
@@ -25,6 +25,9 @@ class Reversibility:
     workdir: str
     rules: IgnoreRules
     enabled: bool = True
+    # Lockfiles changed by the most recent undo (see undo_last). Lets the UI warn
+    # that the environment isn't restored until the package manager is re-run.
+    last_changed_lockfiles: list[str] = field(default_factory=list)
 
     @property
     def project_id(self) -> str:
@@ -101,16 +104,25 @@ class Reversibility:
         the number of entries removed."""
         return ledger.clear(self.project_id)
 
-    def restore_to(self, snapshot_id: str) -> None:
-        """Restore the workspace to the state captured in ``snapshot_id``."""
+    def restore_to(self, snapshot_id: str) -> list[str]:
+        """Restore the workspace to the state captured in ``snapshot_id``.
+
+        Returns any dependency lockfiles the restore changed — the caller should
+        warn that the environment isn't restored until the package manager is
+        re-run (restoring a lockfile rolls back declared versions, not installed
+        packages).
+        """
         snap = snapshots.load_snapshot(self.project_id, snapshot_id)
-        snapshots.restore_snapshot(snap, self.rules)
+        return snapshots.restore_snapshot(snap, self.rules)
 
     def undo_last(self) -> LedgerEntry | None:
         """Revert the most recent action (restore its before-snapshot).
 
         Returns the entry that was undone, or None if there's nothing to undo.
+        Any dependency lockfiles the restore changed are left in
+        ``last_changed_lockfiles`` for the caller to warn about.
         """
+        self.last_changed_lockfiles = []
         entries = self.history()
         if not entries:
             return None
@@ -118,5 +130,5 @@ class Reversibility:
         if not last_entry.snapshot_before:
             # A no-snapshot action (OPENDOT_NO_SNAPSHOT) has nothing to restore.
             return None
-        self.restore_to(last_entry.snapshot_before)
+        self.last_changed_lockfiles = self.restore_to(last_entry.snapshot_before)
         return last_entry

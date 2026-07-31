@@ -378,18 +378,43 @@ def list_snapshots(project_id: str) -> list[str]:
     return sorted(p.stem for p in d.glob("*.json") if p.stem.isdigit())
 
 
-def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> None:
+# Dependency lockfiles. Restoring one rolls back which versions are *declared*,
+# but NOT the installed environment (node_modules, site-packages, global caches,
+# postinstall side effects). So when undo changes a lockfile we warn loudly: the
+# user must re-run their package manager to actually match it. (Ledger principle:
+# never let "files restored" be mistaken for "environment restored".)
+_LOCKFILES = {
+    "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "npm-shrinkwrap.json",
+    "uv.lock", "poetry.lock", "Pipfile.lock", "requirements.txt",
+    "Cargo.lock", "Gemfile.lock", "composer.lock", "go.sum",
+}
+
+
+def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[str]:
     """Make the workspace byte-for-byte match the snapshot.
 
     Rewrites/creates every file in the manifest; removes files that exist now but
     were not captured (respecting ignore rules — we never touch skipped paths).
+
+    Returns the relative paths of any dependency lockfiles whose content the
+    restore changed — the caller should warn that the *environment* isn't
+    restored until the package manager is re-run.
     """
     rules = rules or IgnoreRules()
     wd = Path(snap.workdir).resolve()
+    changed_lockfiles: list[str] = []
 
     # 1. Restore all files from the manifest (content + permission mode).
     for rel, entry in snap.files.items():
         target = wd / rel
+        # Before overwriting, note if this is a lockfile whose content differs —
+        # that means the restore rolled dependency versions back.
+        if Path(rel).name in _LOCKFILES:
+            try:
+                if not target.exists() or _hash_file(target) != entry.h:
+                    changed_lockfiles.append(rel)
+            except OSError:
+                changed_lockfiles.append(rel)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(_read_object(entry.h))
         if entry.mode is not None:
@@ -403,6 +428,8 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> None:
     for f in _iter_files(wd, rules):
         rel = f.relative_to(wd).as_posix()
         if rel not in manifest_paths:
+            if f.name in _LOCKFILES:  # a lockfile the install created → undo removes it
+                changed_lockfiles.append(rel)
             try:
                 f.unlink()
             except OSError:
@@ -420,3 +447,6 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> None:
                 p.rmdir()
         except OSError:
             pass
+
+    # De-dupe (a lockfile could be both changed and matched) and return.
+    return sorted(set(changed_lockfiles))
