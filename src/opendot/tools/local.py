@@ -76,7 +76,16 @@ class Toolbox:
     """
 
     #: tools that only observe — never mutate the filesystem or run commands.
-    READ_ONLY = {"list_files", "read_file", "grep", "glob", "read_xlsx", "read_pptx", "web_fetch"}
+    READ_ONLY = {
+        "list_files",
+        "read_file",
+        "grep",
+        "glob",
+        "read_xlsx",
+        "read_pptx",
+        "read_docx",
+        "web_fetch",
+    }
 
     def __init__(
         self,

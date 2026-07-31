@@ -413,3 +413,89 @@ def test_no_snapshot_ids_stay_monotonic_with_real_snapshots(tmp_path):
     ids = [id1, id2, id3]
     assert ids == sorted(ids)  # strictly increasing
     assert len(set(ids)) == 3  # all unique
+
+
+# --- edge cases (issue #16): symlinks, dedup, deep nesting, file<->dir, unicode ---
+
+
+def test_symlink_is_not_followed_or_captured(tmp_path):
+    """A symlink in the workspace must not be followed into its target, and the
+    snapshot must not capture the symlink as a regular file. Restore must leave
+    the outside target untouched."""
+    wd = _workspace(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("do not touch me")
+    (wd / "link.txt").symlink_to(outside)
+    (wd / "real.py").write_text("real")
+
+    snap = S.take_snapshot(wd)
+    # the symlink is skipped; only the real file is captured
+    assert "real.py" in snap.files
+    assert "link.txt" not in snap.files
+
+    S.restore_snapshot(snap)
+    # the outside target was never read or modified
+    assert outside.read_text() == "do not touch me"
+
+
+def test_identical_content_dedupes_to_one_object(tmp_path):
+    """Two files with the same content share a single content-addressed object,
+    and both restore correctly."""
+    wd = _workspace(tmp_path)
+    (wd / "a.txt").write_text("same bytes")
+    (wd / "b.txt").write_text("same bytes")
+    (wd / "c.txt").write_text("different")
+
+    snap = S.take_snapshot(wd)
+    objs = [o for o in S._objects_dir().iterdir() if o.suffix != ".tmp"]
+    assert len(objs) == 2  # "same bytes" stored once + "different"
+
+    (wd / "a.txt").write_text("wrecked")
+    (wd / "b.txt").unlink()
+    S.restore_snapshot(snap)
+    assert (wd / "a.txt").read_text() == "same bytes"
+    assert (wd / "b.txt").read_text() == "same bytes"
+
+
+def test_deeply_nested_tree_restores(tmp_path):
+    wd = _workspace(tmp_path)
+    deep = wd / "a" / "b" / "c" / "d" / "e"
+    deep.mkdir(parents=True)
+    (deep / "leaf.txt").write_text("buried")
+    snap = S.take_snapshot(wd)
+
+    import shutil
+
+    shutil.rmtree(wd / "a")
+    S.restore_snapshot(snap)
+    assert (deep / "leaf.txt").read_text() == "buried"
+
+
+def test_file_replaced_by_directory_roundtrips(tmp_path):
+    """A path that was a file at snapshot time, then becomes a directory, must be
+    restored back to the file."""
+    wd = _workspace(tmp_path)
+    (wd / "thing").write_text("i am a file")
+    snap = S.take_snapshot(wd)
+
+    (wd / "thing").unlink()
+    (wd / "thing").mkdir()
+    (wd / "thing" / "inside.txt").write_text("now a dir")
+
+    S.restore_snapshot(snap)
+    assert (wd / "thing").is_file()
+    assert (wd / "thing").read_text() == "i am a file"
+
+
+def test_unicode_and_spaces_in_filenames(tmp_path):
+    wd = _workspace(tmp_path)
+    names = ["café menu.txt", "日本語.md", "emoji 🚀.txt"]
+    for n in names:
+        (wd / n).write_text(f"content of {n}")
+    snap = S.take_snapshot(wd)
+
+    for n in names:
+        (wd / n).write_text("changed")
+    S.restore_snapshot(snap)
+    for n in names:
+        assert (wd / n).read_text() == f"content of {n}"

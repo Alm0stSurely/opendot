@@ -58,6 +58,17 @@ _SAFE_COMMANDS = {
     "uniq",
     "cut",
     "tr",
+    # read-only system/info commands (never mutate the fs or reach the network)
+    "ps",
+    "df",
+    "du",
+    "uname",
+    "id",
+    "groups",
+    "printenv",
+    "basename",
+    "dirname",
+    "realpath",
 }
 
 # Signals that a command escapes the workspace or is hard/impossible to undo.

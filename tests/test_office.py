@@ -4,6 +4,7 @@ import pytest
 
 pytest.importorskip("openpyxl")
 pytest.importorskip("pptx")
+pytest.importorskip("docx")
 
 from opendot.reversibility.engine import Reversibility
 from opendot.reversibility.snapshots import IgnoreRules
@@ -46,10 +47,35 @@ def _make_pptx(path):
     prs.save(path)
 
 
+def _make_docx(path):
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading("Project Report", level=1)
+    doc.add_paragraph("First paragraph of the body.")
+    doc.add_paragraph("Second paragraph with details.")
+    doc.save(path)
+
+
 def test_office_tools_registered(tmp_path):
     tb, _, _ = _tb(tmp_path)
     names = {s["function"]["name"] for s in tb.specs()}
-    assert {"read_xlsx", "edit_cell", "read_pptx", "edit_pptx_text"} <= names
+    assert {"read_xlsx", "edit_cell", "read_pptx", "edit_pptx_text", "read_docx"} <= names
+
+
+def test_read_docx(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_docx(wd / "report.docx")
+
+    out = tb.call("read_docx", {"path": "report.docx"})
+    assert "Project Report" in out
+    assert "First paragraph of the body." in out
+    assert "Second paragraph with details." in out
+
+
+def test_read_docx_missing_file(tmp_path):
+    tb, _, _ = _tb(tmp_path)
+    assert tb.call("read_docx", {"path": "nope.docx"}).startswith("error: file not found")
 
 
 def test_read_and_edit_xlsx(tmp_path):

@@ -124,7 +124,22 @@ def build_office_tools(box) -> list:
         prs.save(str(p))
         return f"{box._rel(p)}: replaced {find!r} → {replace!r} in {hits} run(s)"
 
-    return [
+    # ---- docx ----
+    def read_docx(path: str) -> str:
+        from docx import Document
+
+        p = box._resolve(path)
+        if not p.exists():
+            return f"error: file not found: {p}"
+        doc = Document(str(p))
+        lines = [f"document {box._rel(p)}  ({len(doc.paragraphs)} paragraphs)"]
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if text:
+                lines.append(text)
+        return _truncate("\n".join(lines))
+
+    tools = [
         Tool(
             "read_xlsx",
             "Read an .xlsx spreadsheet: lists sheets and prints a sheet's cells as rows.",
@@ -182,3 +197,26 @@ def build_office_tools(box) -> list:
             edit_pptx_text,
         ),
     ]
+
+    # .docx support is gated separately: python-docx is an independent optional
+    # dep, so read_docx only registers when it's importable (openpyxl/pptx users
+    # without python-docx still get the xlsx/pptx tools).
+    try:
+        import docx  # noqa: F401
+
+        tools.append(
+            Tool(
+                "read_docx",
+                "Read a .docx Word document: outputs its paragraph text.",
+                {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+                read_docx,
+            )
+        )
+    except ImportError:
+        pass
+
+    return tools

@@ -453,6 +453,13 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[s
             except OSError:
                 changed_lockfiles.append(rel)
         target.parent.mkdir(parents=True, exist_ok=True)
+        # If a directory now occupies this file's path (the path was a file at
+        # snapshot time but became a dir), remove it first so write_bytes can
+        # recreate the file instead of raising IsADirectoryError.
+        if target.is_dir() and not target.is_symlink():
+            import shutil
+
+            shutil.rmtree(target)
         target.write_bytes(_read_object(entry.h))
         if entry.mode is not None:
             try:
