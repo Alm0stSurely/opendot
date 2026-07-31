@@ -37,3 +37,6 @@ htmlcov/
 
 # Environment / secrets
 .env
+
+# uv lockfile — opendot ships version ranges (published CLI), not a pinned lock.
+uv.lock
