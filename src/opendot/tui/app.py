@@ -701,12 +701,28 @@ class OpendotTUI(App):
             if not target:
                 self._write(f"no action {snap_id} (see /log)", "sys")
                 return
-            rev.restore_to(target.snapshot_before)
-            self._write(f"restored workspace to before action {target.id}", "sys")
+            changed_locks = rev.restore_to(target.snapshot_before)
+            what = f"action {target.id} ({target.kind}: {target.detail.rsplit('/', 1)[-1]})"
         else:
             undone = rev.undo_last()
-            self._write(f"undid last action ({undone.kind}: {undone.detail.rsplit('/',1)[-1]})", "sys")
+            if undone is None:
+                self._write("nothing to undo (or last action wasn't snapshotted)", "sys")
+                return
+            changed_locks = rev.last_changed_lockfiles
+            what = f"the last action ({undone.kind}: {undone.detail.rsplit('/', 1)[-1]})"
+
+        self._write(f"↺ reverted {what}", "sys")   # immediate, deterministic ack
         self._refresh_sidebar()
+        # Then the agent narrates the undo (and, per its system prompt, loudly
+        # warns about environment drift when a lockfile changed). Detection is
+        # done in code above; only the phrasing/help is left to the model.
+        if self._busy:
+            return  # a turn is already running; don't stack another
+        note = f"[undo] Reverted {what}."
+        if changed_locks:
+            note += f" Changed lockfile(s): {', '.join(changed_locks)}."
+        self._busy = True
+        self._turn_worker = self.run_worker(self._run_turn(note), exclusive=True)
 
     def action_log(self) -> None:
         history = self.agent.reversibility.history()

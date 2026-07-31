@@ -158,11 +158,30 @@ def _cmd_undo(workdir: str, snap_id: str | None) -> None:
         if target is None:
             console.print(f"[red]no action with id {snap_id}[/red]  (see: opendot log)")
             return
-        rev.restore_to(target.snapshot_before)
+        changed_locks = rev.restore_to(target.snapshot_before)
         console.print(f"[green]restored[/green] workspace to before action {snap_id} ({target.kind}: {target.detail[:50]})")
+        _note_lockfiles(console, changed_locks)
     else:
         undone = rev.undo_last()
+        if undone is None:
+            console.print("[yellow]nothing to undo[/yellow] (or the last action wasn't snapshotted)")
+            return
         console.print(f"[green]undid[/green] last action ({undone.kind}: {undone.detail[:50]})")
+        _note_lockfiles(console, rev.last_changed_lockfiles)
+
+
+def _note_lockfiles(console, changed: list[str]) -> None:
+    """`opendot undo` is a non-interactive command with no model in the loop, so
+    it states the fact plainly: a lockfile was rolled back, meaning the installed
+    environment no longer matches until the package manager is re-run. (In the
+    interactive TUI the agent narrates this in its own words instead.)"""
+    if not changed:
+        return
+    names = ", ".join(changed)
+    console.print(
+        f"[bold yellow]note:[/bold yellow] lockfile(s) rolled back ([bold]{names}[/bold]) — "
+        f"installed packages are unchanged; re-run your package manager to match."
+    )
 
 
 def _cmd_mcp(args) -> None:
