@@ -267,9 +267,7 @@ def _cmd_mcp(args) -> None:
                 names = [tool.name for tool in manager.tools if tool.server == args.name]
                 suffix = f": {', '.join(names)}" if names else ""
                 tool_label = "tool" if len(names) == 1 else "tools"
-                console.print(
-                    f"[green]✓ connected[/green] — {len(names)} {tool_label}{suffix}"
-                )
+                console.print(f"[green]✓ connected[/green] — {len(names)} {tool_label}{suffix}")
             else:
                 error = manager.errors.get(args.name, "connection did not complete")
                 console.print(f"[red]✗ connection failed[/red] — {error}")
