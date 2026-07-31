@@ -427,6 +427,26 @@ _LOCKFILES = {
 }
 
 
+def _ensure_real_dirs(base: Path, leaf: Path) -> None:
+    """Make every path component from ``base`` (exclusive) down to ``leaf``
+    (inclusive) a real directory. If a component is a symlink or a non-directory,
+    remove it first. This stops restore from writing through a symlinked parent
+    and escaping the workspace. ``base`` itself is never modified.
+    """
+    # Components from base down to leaf, outermost first.
+    parts: list[Path] = []
+    cur = leaf
+    while cur != base and base in cur.parents:
+        parts.append(cur)
+        cur = cur.parent
+    for d in reversed(parts):
+        if d.is_symlink():
+            d.unlink()
+        elif d.exists() and not d.is_dir():
+            d.unlink()
+        d.mkdir(exist_ok=True)
+
+
 def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[str]:
     """Make the workspace byte-for-byte match the snapshot.
 
@@ -452,12 +472,14 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[s
                     changed_lockfiles.append(rel)
             except OSError:
                 changed_lockfiles.append(rel)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # If something else now occupies this file's path (it was a file at
-        # snapshot time but became a symlink or a directory), remove it first so
-        # write_bytes recreates the real file. Crucially, unlink a symlink rather
-        # than writing through it — otherwise write_bytes would follow it and
-        # could overwrite a target OUTSIDE the workspace.
+        # Rebuild the path to the file as REAL directories. If any parent
+        # component was replaced by a symlink (or a non-dir), writing through it
+        # could land the file OUTSIDE the workspace — the one thing restore must
+        # never do. So walk wd -> target.parent and force each level to a real dir.
+        _ensure_real_dirs(wd, target.parent)
+        # If something now occupies the file's own path (it was a file at snapshot
+        # time but became a symlink or a directory), remove it first so write_bytes
+        # recreates the real file rather than writing through a symlink or raising.
         if target.is_symlink():
             target.unlink()
         elif target.is_dir():

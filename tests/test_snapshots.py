@@ -463,6 +463,34 @@ def test_restore_never_writes_through_a_symlink(tmp_path):
     assert outside.read_text() == "must not be overwritten"  # outside untouched
 
 
+def test_restore_never_writes_through_a_symlinked_parent(tmp_path):
+    """A subtler escape: a captured file's PARENT dir is later replaced by a
+    symlink pointing outside the workspace. Restore must rebuild the parent as a
+    real directory, never write the file through the symlink into the target."""
+    wd = _workspace(tmp_path)
+    (wd / "conf").mkdir()
+    (wd / "conf" / "app.conf").write_text("real config")
+    snap = S.take_snapshot(wd)
+
+    # Replace the whole conf/ directory with a symlink to an outside directory.
+    outside_dir = tmp_path / "elsewhere"
+    outside_dir.mkdir()
+    (outside_dir / "app.conf").write_text("outside file, must not be overwritten")
+    import shutil
+
+    shutil.rmtree(wd / "conf")
+    try:
+        (wd / "conf").symlink_to(outside_dir)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform/filesystem")
+
+    S.restore_snapshot(snap)
+    assert not (wd / "conf").is_symlink()  # parent rebuilt as a real dir
+    assert (wd / "conf" / "app.conf").read_text() == "real config"  # restored in-workspace
+    # the outside directory's file was never touched
+    assert (outside_dir / "app.conf").read_text() == "outside file, must not be overwritten"
+
+
 def test_identical_content_dedupes_to_one_object(tmp_path):
     """Two files with the same content share a single content-addressed object,
     and both restore correctly."""
