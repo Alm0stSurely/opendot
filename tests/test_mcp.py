@@ -156,3 +156,62 @@ def test_mcp_add_remote_with_header(tmp_path, monkeypatch):
         "url": "https://mcp.supabase.com/mcp?project_ref=abc",
         "headers": {"Authorization": "Bearer tok123"},
     }
+
+
+def test_mcp_test_cli_reports_connected_tools(tmp_path, monkeypatch, capsys):
+    import sys
+
+    from opendot import cli, mcp
+    from opendot.mcp.manager import MCPTool, add_mcp_server
+
+    add_mcp_server("demo", {"command": "ignored"})
+
+    class FakeManager:
+        def __init__(self, config):
+            assert config == {"demo": {"command": "ignored"}}
+            self.connected = ["demo"]
+            self.errors = {}
+            self.tools = [MCPTool("demo", "ping", "", {})]
+
+        def start(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(mcp, "MCPManager", FakeManager)
+    monkeypatch.setattr(sys, "argv", ["opendot", "mcp", "test", "demo"])
+    cli.main()
+
+    output = capsys.readouterr().out
+    assert "connected" in output
+    assert "1 tool: ping" in output
+
+
+def test_mcp_test_cli_reports_connection_error(tmp_path, monkeypatch, capsys):
+    import sys
+
+    from opendot import cli, mcp
+    from opendot.mcp.manager import add_mcp_server
+
+    add_mcp_server("broken", {"command": "ignored"})
+
+    class FakeManager:
+        def __init__(self, config):
+            self.connected = []
+            self.errors = {"broken": "ConnectionError: refused"}
+            self.tools = []
+
+        def start(self):
+            pass
+
+        def shutdown(self):
+            pass
+
+    monkeypatch.setattr(mcp, "MCPManager", FakeManager)
+    monkeypatch.setattr(sys, "argv", ["opendot", "mcp", "test", "broken"])
+    cli.main()
+
+    output = capsys.readouterr().out
+    assert "connection failed" in output
+    assert "ConnectionError: refused" in output
