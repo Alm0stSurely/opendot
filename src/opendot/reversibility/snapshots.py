@@ -453,10 +453,14 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[s
             except OSError:
                 changed_lockfiles.append(rel)
         target.parent.mkdir(parents=True, exist_ok=True)
-        # If a directory now occupies this file's path (the path was a file at
-        # snapshot time but became a dir), remove it first so write_bytes can
-        # recreate the file instead of raising IsADirectoryError.
-        if target.is_dir() and not target.is_symlink():
+        # If something else now occupies this file's path (it was a file at
+        # snapshot time but became a symlink or a directory), remove it first so
+        # write_bytes recreates the real file. Crucially, unlink a symlink rather
+        # than writing through it — otherwise write_bytes would follow it and
+        # could overwrite a target OUTSIDE the workspace.
+        if target.is_symlink():
+            target.unlink()
+        elif target.is_dir():
             import shutil
 
             shutil.rmtree(target)

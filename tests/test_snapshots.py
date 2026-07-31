@@ -425,7 +425,10 @@ def test_symlink_is_not_followed_or_captured(tmp_path):
     wd = _workspace(tmp_path)
     outside = tmp_path / "outside.txt"
     outside.write_text("do not touch me")
-    (wd / "link.txt").symlink_to(outside)
+    try:
+        (wd / "link.txt").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform/filesystem")
     (wd / "real.py").write_text("real")
 
     snap = S.take_snapshot(wd)
@@ -436,6 +439,28 @@ def test_symlink_is_not_followed_or_captured(tmp_path):
     S.restore_snapshot(snap)
     # the outside target was never read or modified
     assert outside.read_text() == "do not touch me"
+
+
+def test_restore_never_writes_through_a_symlink(tmp_path):
+    """If a captured file's path is later replaced by a symlink pointing OUTSIDE
+    the workspace, restore must unlink it and rewrite the real file, never write
+    through the symlink to the outside target."""
+    wd = _workspace(tmp_path)
+    (wd / "config.txt").write_text("original")
+    snap = S.take_snapshot(wd)
+
+    outside = tmp_path / "secret.txt"
+    outside.write_text("must not be overwritten")
+    (wd / "config.txt").unlink()
+    try:
+        (wd / "config.txt").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform/filesystem")
+
+    S.restore_snapshot(snap)
+    assert (wd / "config.txt").read_text() == "original"  # real file restored
+    assert not (wd / "config.txt").is_symlink()  # symlink removed
+    assert outside.read_text() == "must not be overwritten"  # outside untouched
 
 
 def test_identical_content_dedupes_to_one_object(tmp_path):

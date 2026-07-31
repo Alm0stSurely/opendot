@@ -4,7 +4,8 @@ import pytest
 
 pytest.importorskip("openpyxl")
 pytest.importorskip("pptx")
-pytest.importorskip("docx")
+# NOTE: python-docx is gated per-test (see the read_docx tests), not module-wide,
+# so the xlsx/pptx suite still runs when only python-docx is missing.
 
 from opendot.reversibility.engine import Reversibility
 from opendot.reversibility.snapshots import IgnoreRules
@@ -60,10 +61,16 @@ def _make_docx(path):
 def test_office_tools_registered(tmp_path):
     tb, _, _ = _tb(tmp_path)
     names = {s["function"]["name"] for s in tb.specs()}
-    assert {"read_xlsx", "edit_cell", "read_pptx", "edit_pptx_text", "read_docx"} <= names
+    assert {"read_xlsx", "edit_cell", "read_pptx", "edit_pptx_text"} <= names
+    # read_docx is gated on python-docx being importable.
+    import importlib.util
+
+    if importlib.util.find_spec("docx") is not None:
+        assert "read_docx" in names
 
 
 def test_read_docx(tmp_path):
+    pytest.importorskip("docx")
     tb, wd, _ = _tb(tmp_path)
     _make_docx(wd / "report.docx")
 
@@ -74,6 +81,7 @@ def test_read_docx(tmp_path):
 
 
 def test_read_docx_missing_file(tmp_path):
+    pytest.importorskip("docx")
     tb, _, _ = _tb(tmp_path)
     assert tb.call("read_docx", {"path": "nope.docx"}).startswith("error: file not found")
 
