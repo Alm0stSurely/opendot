@@ -146,3 +146,13 @@ def test_write_inside_workspace_stays_reversible(tmp_path):
     tb, wd, rev = _tb(tmp_path)
     tb.call("write_file", {"path": "new.txt", "content": "inside"})
     assert rev.history()[-1].reversible is True  # in-workspace = undoable
+
+
+def test_read_file_directory_returns_clear_error(tmp_path):
+    """read_file on a directory should suggest the right tool instead of a low-level
+    IsADirectoryError."""
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("read_file", {"path": "src"})
+    assert "is a directory" in out
+    assert "list_files" in out
+    assert "IsADirectoryError" not in out
