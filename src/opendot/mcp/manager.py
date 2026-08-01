@@ -78,7 +78,8 @@ def remove_mcp_server(name: str) -> bool:
         return False
     del servers[name]
     save_mcp_config(servers)
-    # If it was an OAuth server, forget its cached tokens too.
+    # Forget any cached OAuth tokens/registration for this name (a no-op for
+    # servers that never used OAuth).
     try:
         from opendot.mcp.oauth import clear_tokens
 
@@ -193,13 +194,19 @@ class MCPManager:
             except Exception as exc:  # noqa: BLE001 - a bad server must not kill the rest
                 self.errors[name] = f"{type(exc).__name__}: {exc}"
         # OAuth callback servers have done their job once every server is connected.
-        for cb in self._callbacks:
+        # shutdown() also sweeps any survivors, in case it races this coroutine
+        # (e.g. start() timed out and the app exits before we get here).
+        self._close_callbacks()
+        ready.set()
+
+    def _close_callbacks(self) -> None:
+        """Close and forget any open loopback OAuth callback servers (idempotent)."""
+        while self._callbacks:
+            cb = self._callbacks.pop()
             try:
                 cb.close()
             except Exception:  # noqa: BLE001
                 pass
-        self._callbacks.clear()
-        ready.set()
 
     async def _open_transport(self, spec: dict):
         """Return (read, write) streams for a stdio or http/sse server."""
@@ -272,6 +279,10 @@ class MCPManager:
             return f"error calling {server}.{name}: {exc}"
 
     def shutdown(self) -> None:
+        # Close any loopback OAuth callback servers first — they may still be open
+        # if start() timed out mid-authorization and we never reached _connect_all's
+        # own cleanup. Idempotent, so double-closing after a clean connect is fine.
+        self._close_callbacks()
         if self._loop and self._loop.is_running():
 
             async def _close():

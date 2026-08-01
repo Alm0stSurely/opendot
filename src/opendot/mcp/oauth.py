@@ -26,6 +26,7 @@ from __future__ import annotations
 import json
 import threading
 import webbrowser
+from html import escape
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -134,7 +135,10 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.end_headers()
         if error:
-            body = f"<h2>Authorization failed</h2><p>{error}</p><p>You can close this tab.</p>"
+            # Escape: this value comes from the redirect URL, so a crafted link
+            # (e.g. ?error=<script>…) must not inject markup into the page we serve.
+            safe = escape(error)
+            body = f"<h2>Authorization failed</h2><p>{safe}</p><p>You can close this tab.</p>"
         else:
             body = "<h2>Authorized ✓</h2><p>You can close this tab and return to opendot.</p>"
         self.wfile.write(f"<!doctype html><html><body>{body}</body></html>".encode())

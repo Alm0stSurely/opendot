@@ -118,6 +118,23 @@ def test_loopback_callback_reports_error_param():
         cb.close()
 
 
+def test_loopback_callback_escapes_error_html():
+    # A crafted error value must not inject markup into the page we serve back.
+    from opendot.mcp.oauth import _LoopbackCallbackServer
+
+    cb = _LoopbackCallbackServer()
+    cb.start()
+    try:
+        # ?error=<script>alert(1)</script> (URL-encoded)
+        payload = "%3Cscript%3Ealert(1)%3C%2Fscript%3E"
+        page = urllib.request.urlopen(cb.redirect_uri + f"?error={payload}", timeout=5).read()
+        page = page.decode()
+        assert "<script>alert(1)</script>" not in page  # raw markup must not appear
+        assert "&lt;script&gt;" in page  # it's escaped instead
+    finally:
+        cb.close()
+
+
 # -- provider factory --------------------------------------------------------
 
 
@@ -153,6 +170,24 @@ async def test_remove_oauth_server_clears_tokens():
 
     assert remove_mcp_server("linear") is True
     assert not has_stored_tokens("linear")  # tokens forgotten on removal
+
+
+def test_shutdown_closes_leftover_callback_servers():
+    # If start() times out mid-authorization, a callback server can still be open.
+    # shutdown() must close it rather than leak the loopback thread.
+    from opendot.mcp.manager import MCPManager
+    from opendot.mcp.oauth import _LoopbackCallbackServer
+
+    mgr = MCPManager({})  # empty config: start() is a no-op, no background loop
+    cb = _LoopbackCallbackServer()
+    cb.start()
+    mgr._callbacks.append(cb)
+
+    mgr.shutdown()  # should sweep the callback even with no loop running
+    assert mgr._callbacks == []
+    # the loopback port is closed: binding is released (a second bind would work),
+    # and a follow-up close is a harmless no-op (idempotent).
+    mgr.shutdown()
 
 
 def test_cli_add_oauth_flag_stores_auth_oauth(monkeypatch):
