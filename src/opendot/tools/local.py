@@ -172,6 +172,8 @@ class Toolbox:
             p = self._resolve(path)
             if not p.exists():
                 return f"error: file not found: {p}"
+            if p.is_dir():
+                return f"error: {p} is a directory (use list_files to see its contents)"
             try:
                 return _truncate(p.read_text(encoding="utf-8", errors="replace"))
             except Exception as exc:  # noqa: BLE001
