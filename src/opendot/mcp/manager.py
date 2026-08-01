@@ -16,9 +16,13 @@ Config lives at ``~/.opendot/mcp.json`` (Claude-Desktop-style):
                        "env": {"GITHUB_TOKEN": "..."} },
         "remote":    { "url": "https://example.com/mcp" },         // http/sse
         "supabase":  { "url": "https://mcp.supabase.com/mcp?project_ref=abc",
-                       "headers": {"Authorization": "Bearer <PAT>"} }  // authenticated remote
+                       "headers": {"Authorization": "Bearer <PAT>"} },  // static token
+        "linear":    { "url": "https://mcp.linear.app/mcp", "auth": "oauth" }  // browser OAuth
       }
     }
+
+Tokens for ``"auth": "oauth"`` servers live outside this file (see
+``opendot.mcp.oauth``); the config only records that the server uses OAuth.
 
 MCP tools are OPAQUE — opendot can't know if a call is reversible. So callers
 treat every MCP tool as irreversible (confirm + mark ✗ in the ledger).
@@ -74,7 +78,43 @@ def remove_mcp_server(name: str) -> bool:
         return False
     del servers[name]
     save_mcp_config(servers)
+    # If it was an OAuth server, forget its cached tokens too.
+    try:
+        from opendot.mcp.oauth import clear_tokens
+
+        clear_tokens(name)
+    except Exception:  # noqa: BLE001
+        pass
     return True
+
+
+@dataclass
+class AuthorizeResult:
+    ok: bool
+    tool_count: int = 0
+    error: str | None = None
+
+
+def authorize_oauth_server(name: str, spec: dict) -> AuthorizeResult:
+    """Connect one OAuth server now, driving the browser flow, to prove it works.
+
+    Called at add-time (from the TUI) so the user authorizes in-browser immediately
+    and tokens get cached — no restart needed to reach a working state. Spins up a
+    throwaway single-server manager, connects (which opens the browser on first
+    auth), and reports the tool count or the failure. Blocking; run off the UI thread.
+    """
+    mgr = MCPManager({name: spec})
+    try:
+        # The OAuth browser dance waits on a human, so allow well past start's
+        # default settle window (matches the provider's 300s flow timeout).
+        mgr.start(settle_timeout=300.0)
+        if name in mgr.connected:
+            return AuthorizeResult(
+                ok=True, tool_count=sum(1 for t in mgr.tools if t.server == name)
+            )
+        return AuthorizeResult(ok=False, error=mgr.errors.get(name, "connection failed"))
+    finally:
+        mgr.shutdown()
 
 
 @dataclass
@@ -102,10 +142,17 @@ class MCPManager:
         self._thread: threading.Thread | None = None
         self._sessions: dict[str, Any] = {}
         self._stack = None  # AsyncExitStack holding all open connections
+        self._callbacks: list[Any] = []  # loopback OAuth callback servers to close
 
     # -- lifecycle --
-    def start(self) -> None:
-        """Spin up the background loop and connect all configured servers."""
+    def start(self, settle_timeout: float = 30.0) -> None:
+        """Spin up the background loop and connect all configured servers.
+
+        ``settle_timeout`` bounds how long ``start`` blocks waiting for connections
+        to settle. The default (30s) suits normal launch; the OAuth authorize flow
+        passes a larger value because it waits on a human clicking through a browser
+        consent screen.
+        """
         if not self.config or self._thread is not None:
             return
         ready = threading.Event()
@@ -118,7 +165,7 @@ class MCPManager:
 
         self._thread = threading.Thread(target=run, daemon=True, name="opendot-mcp")
         self._thread.start()
-        ready.wait(timeout=30)  # let connections settle (best-effort)
+        ready.wait(timeout=settle_timeout)  # let connections settle (best-effort)
 
     async def _connect_all(self, ready: threading.Event) -> None:
         from contextlib import AsyncExitStack
@@ -128,7 +175,7 @@ class MCPManager:
         self._stack = AsyncExitStack()
         for name, spec in self.config.items():
             try:
-                read, write = await self._open_transport(spec)
+                read, write = await self._open_transport({**spec, "_name": name})
                 session = await self._stack.enter_async_context(ClientSession(read, write))
                 await session.initialize()
                 self._sessions[name] = session
@@ -145,6 +192,13 @@ class MCPManager:
                     )
             except Exception as exc:  # noqa: BLE001 - a bad server must not kill the rest
                 self.errors[name] = f"{type(exc).__name__}: {exc}"
+        # OAuth callback servers have done their job once every server is connected.
+        for cb in self._callbacks:
+            try:
+                cb.close()
+            except Exception:  # noqa: BLE001
+                pass
+        self._callbacks.clear()
         ready.set()
 
     async def _open_transport(self, spec: dict):
@@ -152,14 +206,30 @@ class MCPManager:
         if spec.get("url"):
             url = spec["url"]
             headers = spec.get("headers") or None  # e.g. {"Authorization": "Bearer ..."}
+            auth = None
+            if spec.get("auth") == "oauth":
+                # Browser-OAuth server: attach an OAuthClientProvider (an httpx.Auth)
+                # that drives the authorize/refresh flow. Static headers are ignored
+                # for OAuth servers — the provider supplies Authorization itself.
+                from opendot.mcp.oauth import build_oauth_provider
+
+                auth, callback = build_oauth_provider(url, spec["_name"])
+                self._callbacks.append(callback)
+                headers = None
             if url.rstrip("/").endswith("/sse"):
                 from mcp.client.sse import sse_client
 
-                return (await self._stack.enter_async_context(sse_client(url, headers=headers)))[:2]
+                return (
+                    await self._stack.enter_async_context(
+                        sse_client(url, headers=headers, auth=auth)
+                    )
+                )[:2]
             from mcp.client.streamable_http import streamablehttp_client
 
             return (
-                await self._stack.enter_async_context(streamablehttp_client(url, headers=headers))
+                await self._stack.enter_async_context(
+                    streamablehttp_client(url, headers=headers, auth=auth)
+                )
             )[:2]
         # stdio
         from mcp import StdioServerParameters

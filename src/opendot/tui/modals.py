@@ -190,6 +190,10 @@ class McpAddModal(ModalScreen[dict | None]):
     One field decides the transport: a value starting with http(s):// is a
     remote server (with an optional Authorization header); anything else is a
     stdio launch command (split on spaces).
+
+    For a remote server that uses OAuth (Linear, Notion, GitHub's remote MCP, …),
+    type ``oauth`` in the auth field instead of a header — opendot will open your
+    browser to authorize when you add it.
     """
 
     CSS = """
@@ -209,9 +213,13 @@ class McpAddModal(ModalScreen[dict | None]):
                 placeholder="https://…/mcp   OR   npx -y @scope/server args…",
                 id="target",
             )
-            yield Input(placeholder="Authorization header (remote only, optional)", id="header")
+            yield Input(
+                placeholder="auth (remote only): 'oauth' for browser login, or an "
+                "Authorization header",
+                id="header",
+            )
             yield Static(
-                "enter submit · a value starting with http(s):// is treated as a remote URL",
+                "enter submit · http(s):// = remote URL · type 'oauth' to authorize in a browser",
                 id="hint",
             )
 
@@ -226,7 +234,9 @@ class McpAddModal(ModalScreen[dict | None]):
             return  # name + target required; keep the form open
         if target.lower().startswith(("http://", "https://")):
             spec: dict = {"url": target}
-            if header:
+            if header.lower() == "oauth":
+                spec["auth"] = "oauth"  # browser-OAuth flow, no static token
+            elif header:
                 k, _, v = header.partition("=") if "=" in header else header.partition(":")
                 spec["headers"] = {k.strip(): v.strip()}
         else:
