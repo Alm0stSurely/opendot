@@ -152,6 +152,12 @@ class Toolbox:
 
     # -- the tools --
     def _build(self) -> list[Tool]:
+        def _format_size(num_bytes: int) -> str:
+            if num_bytes < 1024:
+               return f"{num_bytes} B"
+            if num_bytes < 1024 * 1024:
+               return f"{num_bytes / 1024:.1f} KB"
+            return f"{num_bytes / (1024 * 1024):.1f} MB"
         def list_files(path: str = ".") -> str:
             base = self._resolve(path)
             if not base.exists():
@@ -165,7 +171,11 @@ class Toolbox:
                     "__pycache__",
                 }:
                     continue
-                entries.append(e.name + ("/" if e.is_dir() else ""))
+                if e.is_dir():
+                    entries.append(f"{e.name}/")
+                else:
+                    size = _format_size(e.stat().st_size)
+                    entries.append(f"{e.name} ({size})")
             return _truncate("\n".join(entries) or "(empty)")
 
         def read_file(path: str) -> str:
