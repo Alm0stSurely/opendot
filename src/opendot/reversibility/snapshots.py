@@ -427,6 +427,26 @@ _LOCKFILES = {
 }
 
 
+def _ensure_real_dirs(base: Path, leaf: Path) -> None:
+    """Make every path component from ``base`` (exclusive) down to ``leaf``
+    (inclusive) a real directory. If a component is a symlink or a non-directory,
+    remove it first. This stops restore from writing through a symlinked parent
+    and escaping the workspace. ``base`` itself is never modified.
+    """
+    # Components from base down to leaf, outermost first.
+    parts: list[Path] = []
+    cur = leaf
+    while cur != base and base in cur.parents:
+        parts.append(cur)
+        cur = cur.parent
+    for d in reversed(parts):
+        if d.is_symlink():
+            d.unlink()
+        elif d.exists() and not d.is_dir():
+            d.unlink()
+        d.mkdir(exist_ok=True)
+
+
 def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[str]:
     """Make the workspace byte-for-byte match the snapshot.
 
@@ -443,6 +463,15 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[s
 
     # 1. Restore all files from the manifest (content + permission mode).
     for rel, entry in snap.files.items():
+        # Defense in depth: manifest paths are written by opendot from a walk
+        # *inside* the workspace, so they're always safe relative paths. But if a
+        # snapshot file were tampered with to contain an absolute path or a ".."
+        # segment, `wd / rel` could resolve outside the workspace. Skip any such
+        # entry rather than write outside (and rather than abort the whole
+        # restore — the remaining, valid files should still be restored).
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            continue
         target = wd / rel
         # Before overwriting, note if this is a lockfile whose content differs —
         # that means the restore rolled dependency versions back.
@@ -452,7 +481,20 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[s
                     changed_lockfiles.append(rel)
             except OSError:
                 changed_lockfiles.append(rel)
-        target.parent.mkdir(parents=True, exist_ok=True)
+        # Rebuild the path to the file as REAL directories. If any parent
+        # component was replaced by a symlink (or a non-dir), writing through it
+        # could land the file OUTSIDE the workspace — the one thing restore must
+        # never do. So walk wd -> target.parent and force each level to a real dir.
+        _ensure_real_dirs(wd, target.parent)
+        # If something now occupies the file's own path (it was a file at snapshot
+        # time but became a symlink or a directory), remove it first so write_bytes
+        # recreates the real file rather than writing through a symlink or raising.
+        if target.is_symlink():
+            target.unlink()
+        elif target.is_dir():
+            import shutil
+
+            shutil.rmtree(target)
         target.write_bytes(_read_object(entry.h))
         if entry.mode is not None:
             try:

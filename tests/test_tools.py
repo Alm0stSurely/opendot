@@ -109,3 +109,40 @@ def test_web_fetch_is_read_only():
     from opendot.tools.local import Toolbox
 
     assert "web_fetch" in Toolbox.READ_ONLY  # runs without a snapshot, like read_file
+
+
+def test_write_outside_workspace_is_irreversible_and_confirmed(tmp_path):
+    """A write outside the working dir isn't covered by the snapshot, so it must
+    be confirmed first and recorded as NOT reversible (undo that doesn't lie)."""
+    tb, wd, rev = _tb(tmp_path)
+    outside = tmp_path / "outside.txt"  # sibling of ws/, not under it
+
+    out = tb.call("write_file", {"path": str(outside), "content": "hi"})
+    assert "created" in out or "updated" in out
+    assert outside.read_text() == "hi"
+
+    last = rev.history()[-1]
+    assert last.reversible is False  # ledger tells the truth
+    assert "not undoable" in last.note
+
+
+def test_declining_outside_write_skips_it(tmp_path):
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.snapshots import IgnoreRules
+    from opendot.tools.local import Toolbox
+
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: False)  # decline
+
+    outside = tmp_path / "outside.txt"
+    out = tb.call("write_file", {"path": str(outside), "content": "hi"})
+    assert out.startswith("skipped")
+    assert not outside.exists()  # nothing written
+
+
+def test_write_inside_workspace_stays_reversible(tmp_path):
+    tb, wd, rev = _tb(tmp_path)
+    tb.call("write_file", {"path": "new.txt", "content": "inside"})
+    assert rev.history()[-1].reversible is True  # in-workspace = undoable

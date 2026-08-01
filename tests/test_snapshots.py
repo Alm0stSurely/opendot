@@ -413,3 +413,163 @@ def test_no_snapshot_ids_stay_monotonic_with_real_snapshots(tmp_path):
     ids = [id1, id2, id3]
     assert ids == sorted(ids)  # strictly increasing
     assert len(set(ids)) == 3  # all unique
+
+
+# --- edge cases (issue #16): symlinks, dedup, deep nesting, file<->dir, unicode ---
+
+
+def test_symlink_is_not_followed_or_captured(tmp_path):
+    """A symlink in the workspace must not be followed into its target, and the
+    snapshot must not capture the symlink as a regular file. Restore must leave
+    the outside target untouched."""
+    wd = _workspace(tmp_path)
+    outside = tmp_path / "outside.txt"
+    outside.write_text("do not touch me")
+    try:
+        (wd / "link.txt").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform/filesystem")
+    (wd / "real.py").write_text("real")
+
+    snap = S.take_snapshot(wd)
+    # the symlink is skipped; only the real file is captured
+    assert "real.py" in snap.files
+    assert "link.txt" not in snap.files
+
+    S.restore_snapshot(snap)
+    # the outside target was never read or modified
+    assert outside.read_text() == "do not touch me"
+
+
+def test_restore_never_writes_through_a_symlink(tmp_path):
+    """If a captured file's path is later replaced by a symlink pointing OUTSIDE
+    the workspace, restore must unlink it and rewrite the real file, never write
+    through the symlink to the outside target."""
+    wd = _workspace(tmp_path)
+    (wd / "config.txt").write_text("original")
+    snap = S.take_snapshot(wd)
+
+    outside = tmp_path / "secret.txt"
+    outside.write_text("must not be overwritten")
+    (wd / "config.txt").unlink()
+    try:
+        (wd / "config.txt").symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform/filesystem")
+
+    S.restore_snapshot(snap)
+    assert (wd / "config.txt").read_text() == "original"  # real file restored
+    assert not (wd / "config.txt").is_symlink()  # symlink removed
+    assert outside.read_text() == "must not be overwritten"  # outside untouched
+
+
+def test_restore_ignores_tampered_absolute_and_traversal_paths(tmp_path):
+    """A tampered snapshot manifest with an absolute path or a '..' segment must
+    not write outside the workspace; valid entries still restore."""
+    wd = _workspace(tmp_path)
+    (wd / "good.txt").write_text("legit")
+    snap = S.take_snapshot(wd)
+
+    # Reuse a real stored object hash for the malicious entries.
+    real_hash = snap.files["good.txt"].h
+    outside = tmp_path / "escape.txt"  # sits OUTSIDE wd
+    snap.files["../escape.txt"] = S.FileEntry(h=real_hash)
+    snap.files[str((tmp_path / "abs_escape.txt"))] = S.FileEntry(h=real_hash)
+
+    (wd / "good.txt").write_text("changed")
+    S.restore_snapshot(snap)
+
+    assert (wd / "good.txt").read_text() == "legit"  # valid entry still restored
+    assert not outside.exists()  # traversal entry was skipped
+    assert not (tmp_path / "abs_escape.txt").exists()  # absolute entry was skipped
+
+
+def test_restore_never_writes_through_a_symlinked_parent(tmp_path):
+    """A subtler escape: a captured file's PARENT dir is later replaced by a
+    symlink pointing outside the workspace. Restore must rebuild the parent as a
+    real directory, never write the file through the symlink into the target."""
+    wd = _workspace(tmp_path)
+    (wd / "conf").mkdir()
+    (wd / "conf" / "app.conf").write_text("real config")
+    snap = S.take_snapshot(wd)
+
+    # Replace the whole conf/ directory with a symlink to an outside directory.
+    outside_dir = tmp_path / "elsewhere"
+    outside_dir.mkdir()
+    (outside_dir / "app.conf").write_text("outside file, must not be overwritten")
+    import shutil
+
+    shutil.rmtree(wd / "conf")
+    try:
+        (wd / "conf").symlink_to(outside_dir)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform/filesystem")
+
+    S.restore_snapshot(snap)
+    assert not (wd / "conf").is_symlink()  # parent rebuilt as a real dir
+    assert (wd / "conf" / "app.conf").read_text() == "real config"  # restored in-workspace
+    # the outside directory's file was never touched
+    assert (outside_dir / "app.conf").read_text() == "outside file, must not be overwritten"
+
+
+def test_identical_content_dedupes_to_one_object(tmp_path):
+    """Two files with the same content share a single content-addressed object,
+    and both restore correctly."""
+    wd = _workspace(tmp_path)
+    (wd / "a.txt").write_text("same bytes")
+    (wd / "b.txt").write_text("same bytes")
+    (wd / "c.txt").write_text("different")
+
+    snap = S.take_snapshot(wd)
+    objs = [o for o in S._objects_dir().iterdir() if o.suffix != ".tmp"]
+    assert len(objs) == 2  # "same bytes" stored once + "different"
+
+    (wd / "a.txt").write_text("wrecked")
+    (wd / "b.txt").unlink()
+    S.restore_snapshot(snap)
+    assert (wd / "a.txt").read_text() == "same bytes"
+    assert (wd / "b.txt").read_text() == "same bytes"
+
+
+def test_deeply_nested_tree_restores(tmp_path):
+    wd = _workspace(tmp_path)
+    deep = wd / "a" / "b" / "c" / "d" / "e"
+    deep.mkdir(parents=True)
+    (deep / "leaf.txt").write_text("buried")
+    snap = S.take_snapshot(wd)
+
+    import shutil
+
+    shutil.rmtree(wd / "a")
+    S.restore_snapshot(snap)
+    assert (deep / "leaf.txt").read_text() == "buried"
+
+
+def test_file_replaced_by_directory_roundtrips(tmp_path):
+    """A path that was a file at snapshot time, then becomes a directory, must be
+    restored back to the file."""
+    wd = _workspace(tmp_path)
+    (wd / "thing").write_text("i am a file")
+    snap = S.take_snapshot(wd)
+
+    (wd / "thing").unlink()
+    (wd / "thing").mkdir()
+    (wd / "thing" / "inside.txt").write_text("now a dir")
+
+    S.restore_snapshot(snap)
+    assert (wd / "thing").is_file()
+    assert (wd / "thing").read_text() == "i am a file"
+
+
+def test_unicode_and_spaces_in_filenames(tmp_path):
+    wd = _workspace(tmp_path)
+    names = ["café menu.txt", "日本語.md", "emoji 🚀.txt"]
+    for n in names:
+        (wd / n).write_text(f"content of {n}")
+    snap = S.take_snapshot(wd)
+
+    for n in names:
+        (wd / n).write_text("changed")
+    S.restore_snapshot(snap)
+    for n in names:
+        assert (wd / n).read_text() == f"content of {n}"

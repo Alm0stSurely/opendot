@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "opendot"
-version = "0.1.8"
+version = "0.1.9"
 description = "An interactive terminal AI agent you can fully undo — any model, acts on your real files, every action reversible."
 readme = "README.md"
 license = "MIT"
@@ -32,8 +32,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-office = ["openpyxl>=3.1", "python-pptx>=0.6"]  # xlsx / pptx read+edit tools
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "openpyxl>=3.1", "python-pptx>=0.6"]
+office = ["openpyxl>=3.1", "python-pptx>=0.6", "python-docx>=1.1"]  # xlsx / pptx / docx tools
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "openpyxl>=3.1", "python-pptx>=0.6", "python-docx>=1.1"]
 
 [project.scripts]
 opendot = "opendot.cli:main"

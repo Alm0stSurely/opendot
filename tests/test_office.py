@@ -4,6 +4,8 @@ import pytest
 
 pytest.importorskip("openpyxl")
 pytest.importorskip("pptx")
+# NOTE: python-docx is gated per-test (see the read_docx tests), not module-wide,
+# so the xlsx/pptx suite still runs when only python-docx is missing.
 
 from opendot.reversibility.engine import Reversibility
 from opendot.reversibility.snapshots import IgnoreRules
@@ -46,10 +48,42 @@ def _make_pptx(path):
     prs.save(path)
 
 
+def _make_docx(path):
+    from docx import Document
+
+    doc = Document()
+    doc.add_heading("Project Report", level=1)
+    doc.add_paragraph("First paragraph of the body.")
+    doc.add_paragraph("Second paragraph with details.")
+    doc.save(path)
+
+
 def test_office_tools_registered(tmp_path):
     tb, _, _ = _tb(tmp_path)
     names = {s["function"]["name"] for s in tb.specs()}
     assert {"read_xlsx", "edit_cell", "read_pptx", "edit_pptx_text"} <= names
+    # read_docx is gated on python-docx being importable.
+    import importlib.util
+
+    if importlib.util.find_spec("docx") is not None:
+        assert "read_docx" in names
+
+
+def test_read_docx(tmp_path):
+    pytest.importorskip("docx")
+    tb, wd, _ = _tb(tmp_path)
+    _make_docx(wd / "report.docx")
+
+    out = tb.call("read_docx", {"path": "report.docx"})
+    assert "Project Report" in out
+    assert "First paragraph of the body." in out
+    assert "Second paragraph with details." in out
+
+
+def test_read_docx_missing_file(tmp_path):
+    pytest.importorskip("docx")
+    tb, _, _ = _tb(tmp_path)
+    assert tb.call("read_docx", {"path": "nope.docx"}).startswith("error: file not found")
 
 
 def test_read_and_edit_xlsx(tmp_path):
@@ -110,3 +144,38 @@ def test_edit_pptx_missing_text_is_error(tmp_path):
     _make_pptx(wd / "deck.pptx")
     res = tb.call("edit_pptx_text", {"path": "deck.pptx", "find": "nope", "replace": "x"})
     assert "not found" in res
+
+
+def test_office_edit_outside_workspace_is_irreversible(tmp_path):
+    """An office edit to a file outside the working dir isn't covered by the
+    snapshot, so it's recorded as not-undoable (undo that doesn't lie)."""
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: True)
+
+    outside = tmp_path / "outside.xlsx"  # sibling of ws/, not under it
+    _make_xlsx(outside)
+
+    res = tb.call("edit_cell", {"path": str(outside), "cell": "B2", "value": "999"})
+    assert "999" in res
+    last = rev.history()[-1]
+    assert last.reversible is False
+    assert "not undoable" in last.note
+
+
+def test_office_edit_outside_declined_is_skipped(tmp_path):
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: False)  # decline
+
+    outside = tmp_path / "outside.xlsx"
+    _make_xlsx(outside)
+    import openpyxl
+
+    before = openpyxl.load_workbook(outside).active["B2"].value
+    res = tb.call("edit_cell", {"path": str(outside), "cell": "B2", "value": "999"})
+    assert res.startswith("skipped")
+    after = openpyxl.load_workbook(outside).active["B2"].value
+    assert after == before  # file on disk unchanged

@@ -85,6 +85,13 @@ def test_readonly_allowed():
     assert _rev("pwd")
 
 
+def test_readonly_system_info_commands_allowed():
+    # read-only system/info commands added to _SAFE_COMMANDS: they never mutate
+    # the filesystem or reach the network, so they auto-run without confirmation.
+    for cmd in ("ps aux", "df -h", "du -sh .", "uname -a", "id", "printenv PATH", "realpath ."):
+        assert _rev(cmd), f"expected {cmd!r} to be reversible/read-only"
+
+
 def test_inworkspace_mutations_allowed():
     assert _rev("touch new.txt")
     assert _rev("mkdir subdir")
