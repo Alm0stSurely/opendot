@@ -116,19 +116,26 @@ opendot mcp add <name> --env KEY=VALUE -- <command> [args...]
 # a remote server (http/sse)
 opendot mcp add <name> --url <https url>
 
-# a remote server that needs auth — pass an HTTP header
+# a remote server with a static token — pass an HTTP header
 opendot mcp add supabase \
   --url "https://mcp.supabase.com/mcp?project_ref=<id>&read_only=true" \
   --header "Authorization=Bearer <your-supabase-access-token>"
+
+# a remote server that uses OAuth — authorize in your browser
+opendot mcp add linear --url "https://mcp.linear.app/mcp" --oauth
 
 opendot mcp list           # show configured servers
 opendot mcp remove <name>  # remove one
 ```
 
 Servers are stored in `~/.opendot/mcp.json` and connect automatically on the
-next launch; connected servers appear in the sidebar. For authenticated remote
-servers, opendot supports the header/token method (e.g. Supabase's access
-token) — the interactive browser-OAuth flow is not implemented yet.
+next launch; connected servers appear in the sidebar. Authenticated remote
+servers work two ways: a **static token** via `--header` (e.g. Supabase's access
+token), or **browser OAuth** via `--oauth` (or by typing `oauth` in the `/mcp`
+add form) — opendot opens your browser to authorize, runs a one-shot local
+callback server to catch the redirect, and caches the issued tokens under
+`~/.opendot/mcp_oauth/` (owner-readable only), refreshing them automatically.
+Removing a server also forgets its cached OAuth tokens.
 
 Because opendot can't know what an external tool does, **every MCP tool call is
 treated as irreversible** — it's confirmed before running and marked ✗ in the

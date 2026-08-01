@@ -520,7 +520,9 @@ class OpendotTUI(App):
         self._refresh_sidebar()
 
     async def _manage_mcp(self) -> None:
-        from opendot.mcp import add_mcp_server, load_mcp_config
+        import asyncio
+
+        from opendot.mcp import add_mcp_server, authorize_oauth_server, load_mcp_config
 
         servers = load_mcp_config()
         mgr = getattr(self.agent, "mcp", None)
@@ -547,10 +549,29 @@ class OpendotTUI(App):
         result = await self.push_screen_wait(McpAddModal())
         if not result:
             return
-        add_mcp_server(result["name"], result["spec"])
+        name, spec = result["name"], result["spec"]
+        add_mcp_server(name, spec)
+
+        if spec.get("auth") == "oauth":
+            # Authorize in the browser now so the server is usable without a restart.
+            self._write(f"→ opening your browser to authorize '{name}'…", "sys")
+            res = await asyncio.to_thread(authorize_oauth_server, name, spec)
+            if res.ok:
+                self._write(
+                    f"✓ '{name}' authorized — {res.tool_count} tools. "
+                    f"They load on next launch (restart opendot).",
+                    "sys",
+                )
+            else:
+                self._write(
+                    f"✗ couldn't authorize '{name}': {res.error}. "
+                    f"The server is saved; retry from /mcp.",
+                    "sys",
+                )
+            return
+
         self._write(
-            f"✓ added MCP server '{result['name']}' — it connects on next launch "
-            f"(restart opendot).",
+            f"✓ added MCP server '{name}' — it connects on next launch (restart opendot).",
             "sys",
         )
 

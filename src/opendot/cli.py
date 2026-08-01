@@ -229,12 +229,14 @@ def _cmd_mcp(args) -> None:
                 env[k] = v
         if args.url:
             spec = {"url": args.url}
+            if getattr(args, "oauth", False):
+                spec["auth"] = "oauth"  # browser-OAuth; opendot obtains tokens itself
             headers = {}
             for pair in getattr(args, "header", []):
                 if "=" in pair:
                     k, v = pair.split("=", 1)
                     headers[k.strip()] = v.strip()
-            if headers:
+            if headers and "auth" not in spec:
                 spec["headers"] = headers  # e.g. Authorization=Bearer <token>
         else:
             cmd = list(getattr(args, "post_dashdash", []))
@@ -249,6 +251,22 @@ def _cmd_mcp(args) -> None:
         if env:
             spec["env"] = env
         add_mcp_server(args.name, spec)
+        if spec.get("auth") == "oauth":
+            from opendot.mcp import authorize_oauth_server
+
+            console.print(f"opening your browser to authorize [cyan]{args.name}[/cyan]…")
+            res = authorize_oauth_server(args.name, spec)
+            if res.ok:
+                console.print(
+                    f"[green]✓ authorized[/green] [cyan]{args.name}[/cyan] — "
+                    f"{res.tool_count} tools. They load next time you run opendot."
+                )
+            else:
+                console.print(
+                    f"[red]✗ authorization failed[/red] — {res.error}. "
+                    f"The server is saved; retry with `opendot mcp test {args.name}`."
+                )
+            return
         console.print(
             f"[green]added[/green] MCP server [cyan]{args.name}[/cyan]. It will connect next time you run opendot."
         )
@@ -478,6 +496,12 @@ def main() -> None:
         metavar="KEY=VAL",
         help="HTTP header for a remote (--url) server, e.g. "
         "'Authorization=Bearer <token>' (repeatable).",
+    )
+    p_add.add_argument(
+        "--oauth",
+        action="store_true",
+        help="Authorize a remote (--url) server via browser OAuth instead of a static "
+        "token. Opens your browser to authorize when you add it.",
     )
     # The launch command (after `--`) is captured from argv in main(), not here,
     # so its own flags (e.g. -y) aren't parsed by argparse.
