@@ -53,15 +53,20 @@ async def test_token_storage_roundtrip():
 async def test_token_file_is_owner_only():
     from mcp.shared.auth import OAuthToken
 
-    from opendot.mcp.oauth import FileTokenStorage, _token_file
+    from opendot.mcp.oauth import FileTokenStorage, _oauth_dir, _token_file
 
-    await FileTokenStorage("secretsrv").set_tokens(
-        OAuthToken(access_token="x", token_type="Bearer")
-    )
+    store = FileTokenStorage("secretsrv")
+    await store.set_tokens(OAuthToken(access_token="x", token_type="Bearer"))
     path = _token_file("secretsrv")
     assert path.exists()
     # tokens are secrets — file must not be group/world readable
     assert (path.stat().st_mode & 0o077) == 0, "token file must be mode 0600"
+
+    # An overwrite (second write, e.g. token refresh) must preserve 0600 and not
+    # leave a temp file behind (atomic write via os.replace).
+    await store.set_tokens(OAuthToken(access_token="y", token_type="Bearer"))
+    assert (path.stat().st_mode & 0o077) == 0
+    assert not any(p.name.endswith(".tmp") for p in _oauth_dir().iterdir())
 
 
 def test_clear_tokens():

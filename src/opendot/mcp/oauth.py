@@ -24,6 +24,7 @@ config only records ``"auth": "oauth"`` so opendot knows to attach the provider.
 from __future__ import annotations
 
 import json
+import os
 import threading
 import webbrowser
 from html import escape
@@ -70,11 +71,21 @@ class FileTokenStorage:
             return {}
 
     def _write(self, data: dict) -> None:
-        self._path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Tokens are secrets, so the file must never exist group/world-readable —
+        # not even briefly. Create a temp file that is 0600 *from the first byte*
+        # (O_CREAT with mode 0o600, before any content lands), then atomically
+        # rename it into place. os.replace also means a crash mid-write can't leave
+        # a torn token file.
+        payload = json.dumps(data, indent=2).encode("utf-8")
+        tmp = self._path.with_name(f".{self._path.name}.{os.getpid()}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
-            self._path.chmod(0o600)  # tokens are secrets
-        except OSError:
-            pass
+            with os.fdopen(fd, "wb") as f:
+                f.write(payload)
+            os.replace(tmp, self._path)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
 
     async def get_tokens(self):
         from mcp.shared.auth import OAuthToken
