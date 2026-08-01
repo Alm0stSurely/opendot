@@ -463,6 +463,27 @@ def test_restore_never_writes_through_a_symlink(tmp_path):
     assert outside.read_text() == "must not be overwritten"  # outside untouched
 
 
+def test_restore_ignores_tampered_absolute_and_traversal_paths(tmp_path):
+    """A tampered snapshot manifest with an absolute path or a '..' segment must
+    not write outside the workspace; valid entries still restore."""
+    wd = _workspace(tmp_path)
+    (wd / "good.txt").write_text("legit")
+    snap = S.take_snapshot(wd)
+
+    # Reuse a real stored object hash for the malicious entries.
+    real_hash = snap.files["good.txt"].h
+    outside = tmp_path / "escape.txt"  # sits OUTSIDE wd
+    snap.files["../escape.txt"] = S.FileEntry(h=real_hash)
+    snap.files[str((tmp_path / "abs_escape.txt"))] = S.FileEntry(h=real_hash)
+
+    (wd / "good.txt").write_text("changed")
+    S.restore_snapshot(snap)
+
+    assert (wd / "good.txt").read_text() == "legit"  # valid entry still restored
+    assert not outside.exists()  # traversal entry was skipped
+    assert not (tmp_path / "abs_escape.txt").exists()  # absolute entry was skipped
+
+
 def test_restore_never_writes_through_a_symlinked_parent(tmp_path):
     """A subtler escape: a captured file's PARENT dir is later replaced by a
     symlink pointing outside the workspace. Restore must rebuild the parent as a

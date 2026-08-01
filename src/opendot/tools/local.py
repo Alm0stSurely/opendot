@@ -130,6 +130,16 @@ class Toolbox:
         except ValueError:
             return str(p)
 
+    def _is_outside_workspace(self, p: Path) -> bool:
+        """True if ``p`` is not under the working directory. Writes/edits to such
+        paths can't be undone (the snapshot only covers the workspace), so they're
+        recorded as irreversible and confirmed first, like escaping shell commands."""
+        try:
+            p.resolve().relative_to(self.workdir)
+            return False
+        except ValueError:
+            return True
+
     def _is_ignored(self, p: Path) -> bool:
         return any(part in self._IGNORE for part in p.parts)
 
@@ -175,9 +185,21 @@ class Toolbox:
                     old = p.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     old = ""
-            # Snapshot before mutating so the write can be undone.
+            # A write outside the working dir isn't covered by the snapshot, so it
+            # can't be undone. Confirm first and record it honestly as irreversible,
+            # exactly like an escaping shell command. Never claim a lying undo.
+            outside = self._is_outside_workspace(p)
+            if outside and not self._confirm(
+                f"This writes outside the workspace and can't be undone:\n  {p}\nWrite it?"
+            ):
+                return "skipped: user declined a write outside the workspace"
             if self.rev is not None:
-                self.rev.before_action("write", str(p), reversible=True)
+                self.rev.before_action(
+                    "write",
+                    str(p),
+                    reversible=not outside,
+                    note="outside the workspace — not undoable" if outside else "",
+                )
             try:
                 p.parent.mkdir(parents=True, exist_ok=True)
                 p.write_text(content, encoding="utf-8")
@@ -302,8 +324,20 @@ class Toolbox:
             n = text.count(find)
             if n == 0:
                 return f"error: `find` string not present in {p} (no change made)"
+            # An edit outside the working dir isn't covered by the snapshot, so it
+            # can't be undone: confirm first and record it as irreversible.
+            outside = self._is_outside_workspace(p)
+            if outside and not self._confirm(
+                f"This edits a file outside the workspace and can't be undone:\n  {p}\nEdit it?"
+            ):
+                return "skipped: user declined an edit outside the workspace"
             if self.rev is not None:
-                self.rev.before_action("write", str(p), reversible=True)
+                self.rev.before_action(
+                    "write",
+                    str(p),
+                    reversible=not outside,
+                    note="outside the workspace — not undoable" if outside else "",
+                )
             new = text.replace(find, replace, count if count > 0 else -1)
             p.write_text(new, encoding="utf-8")
             replaced = n if count == 0 else min(n, count)

@@ -144,3 +144,38 @@ def test_edit_pptx_missing_text_is_error(tmp_path):
     _make_pptx(wd / "deck.pptx")
     res = tb.call("edit_pptx_text", {"path": "deck.pptx", "find": "nope", "replace": "x"})
     assert "not found" in res
+
+
+def test_office_edit_outside_workspace_is_irreversible(tmp_path):
+    """An office edit to a file outside the working dir isn't covered by the
+    snapshot, so it's recorded as not-undoable (undo that doesn't lie)."""
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: True)
+
+    outside = tmp_path / "outside.xlsx"  # sibling of ws/, not under it
+    _make_xlsx(outside)
+
+    res = tb.call("edit_cell", {"path": str(outside), "cell": "B2", "value": "999"})
+    assert "999" in res
+    last = rev.history()[-1]
+    assert last.reversible is False
+    assert "not undoable" in last.note
+
+
+def test_office_edit_outside_declined_is_skipped(tmp_path):
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: False)  # decline
+
+    outside = tmp_path / "outside.xlsx"
+    _make_xlsx(outside)
+    import openpyxl
+
+    before = openpyxl.load_workbook(outside).active["B2"].value
+    res = tb.call("edit_cell", {"path": str(outside), "cell": "B2", "value": "999"})
+    assert res.startswith("skipped")
+    after = openpyxl.load_workbook(outside).active["B2"].value
+    assert after == before  # file on disk unchanged

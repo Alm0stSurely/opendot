@@ -34,9 +34,25 @@ def build_office_tools(box) -> list:
 
     from opendot.tools.local import Tool, _truncate
 
-    def _snapshot(p: Path) -> None:
+    def _snapshot(p: Path) -> bool:
+        """Snapshot ``p`` before an edit. Returns True to proceed, False if the
+        user declined an out-of-workspace edit. A file outside the working dir
+        isn't covered by the snapshot, so it can't be undone: confirm first and
+        record it as irreversible, exactly like write_file/edit and the shell path.
+        """
+        outside = box._is_outside_workspace(p)
+        if outside and not box._confirm(
+            f"This edits a file outside the workspace and can't be undone:\n  {p}\nEdit it?"
+        ):
+            return False
         if box.rev is not None:
-            box.rev.before_action("write", str(p), reversible=True)
+            box.rev.before_action(
+                "write",
+                str(p),
+                reversible=not outside,
+                note="outside the workspace — not undoable" if outside else "",
+            )
+        return True
 
     # ---- xlsx ----
     def read_xlsx(path: str, sheet: str | None = None, max_rows: int = 100) -> str:
@@ -69,7 +85,8 @@ def build_office_tools(box) -> list:
         wb = openpyxl.load_workbook(p)
         ws = wb[sheet] if sheet else wb[wb.sheetnames[0]]
         old = ws[cell].value
-        _snapshot(p)
+        if not _snapshot(p):
+            return "skipped: user declined an edit outside the workspace"
         # numbers stay numbers; formulas (leading '=') pass through
         v: Any = value
         if not value.startswith("="):
@@ -120,7 +137,8 @@ def build_office_tools(box) -> list:
                             hits += 1
         if hits == 0:
             return f"error: text {find!r} not found in {box._rel(p)} (no change)"
-        _snapshot(p)
+        if not _snapshot(p):  # in-memory edits above are dropped; disk file untouched
+            return "skipped: user declined an edit outside the workspace"
         prs.save(str(p))
         return f"{box._rel(p)}: replaced {find!r} → {replace!r} in {hits} run(s)"
 

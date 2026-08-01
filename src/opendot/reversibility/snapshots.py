@@ -463,6 +463,15 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[s
 
     # 1. Restore all files from the manifest (content + permission mode).
     for rel, entry in snap.files.items():
+        # Defense in depth: manifest paths are written by opendot from a walk
+        # *inside* the workspace, so they're always safe relative paths. But if a
+        # snapshot file were tampered with to contain an absolute path or a ".."
+        # segment, `wd / rel` could resolve outside the workspace. Skip any such
+        # entry rather than write outside (and rather than abort the whole
+        # restore — the remaining, valid files should still be restored).
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            continue
         target = wd / rel
         # Before overwriting, note if this is a lockfile whose content differs —
         # that means the restore rolled dependency versions back.
