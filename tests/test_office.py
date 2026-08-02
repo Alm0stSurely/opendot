@@ -146,6 +146,66 @@ def test_edit_pptx_missing_text_is_error(tmp_path):
     assert "not found" in res
 
 
+def test_read_pptx_bounds_max_slides(tmp_path):
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    tb, wd, _ = _tb(tmp_path)
+    prs = Presentation()
+    for i in range(5):
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+        box.text_frame.text = f"Slide {i + 1}"
+    prs.save(wd / "deck.pptx")
+
+    out = tb.call("read_pptx", {"path": "deck.pptx", "max_slides": 2})
+    assert "Slide 1" in out
+    assert "Slide 2" in out
+    assert "Slide 3" not in out
+    assert "... (3 more slides)" in out
+
+
+def test_read_docx_bounds_max_paragraphs(tmp_path):
+    pytest.importorskip("docx")
+    from docx import Document
+
+    tb, wd, _ = _tb(tmp_path)
+    doc = Document()
+    for i in range(5):
+        doc.add_paragraph(f"Paragraph {i + 1}")
+    doc.save(wd / "report.docx")
+
+    out = tb.call("read_docx", {"path": "report.docx", "max_paragraphs": 2})
+    assert "Paragraph 1" in out
+    assert "Paragraph 2" in out
+    assert "Paragraph 3" not in out
+    assert "... (3 more paragraphs)" in out
+
+
+def test_read_pptx_and_docx_default_bounds_preserve_small_files(tmp_path):
+    pytest.importorskip("docx")
+    tb, wd, _ = _tb(tmp_path)
+
+    _make_pptx(wd / "deck.pptx")
+    _make_docx(wd / "report.docx")
+
+    pptx_out = tb.call("read_pptx", {"path": "deck.pptx"})
+    assert "Old Title" in pptx_out
+    assert "more slides" not in pptx_out
+
+    docx_out = tb.call("read_docx", {"path": "report.docx"})
+    assert "Project Report" in docx_out
+    assert "more paragraphs" not in docx_out
+
+
+def test_pptx_and_docx_schema_includes_bound_params(tmp_path):
+    tb, _, _ = _tb(tmp_path)
+    specs = {s["function"]["name"]: s["function"]["parameters"] for s in tb.specs()}
+
+    assert "max_slides" in specs["read_pptx"]["properties"]
+    assert "max_paragraphs" in specs["read_docx"]["properties"]
+
+
 def test_office_edit_outside_workspace_is_irreversible(tmp_path):
     """An office edit to a file outside the working dir isn't covered by the
     snapshot, so it's recorded as not-undoable (undo that doesn't lie)."""

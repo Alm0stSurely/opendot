@@ -102,15 +102,19 @@ def build_office_tools(box) -> list:
         return f"{box._rel(p)} [{ws.title}] {cell}: {old!r} → {v!r}"
 
     # ---- pptx ----
-    def read_pptx(path: str) -> str:
+    def read_pptx(path: str, max_slides: int = 50) -> str:
         from pptx import Presentation
 
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
         prs = Presentation(str(p))
-        lines = [f"presentation {box._rel(p)}  ({len(prs.slides)} slides)"]
+        total = len(prs.slides)
+        lines = [f"presentation {box._rel(p)}  ({total} slides)"]
         for i, slide in enumerate(prs.slides, 1):
+            if i > max_slides:
+                lines.append(f"... ({total - max_slides} more slides)")
+                break
             texts = [
                 sh.text.strip() for sh in slide.shapes if sh.has_text_frame and sh.text.strip()
             ]
@@ -143,18 +147,24 @@ def build_office_tools(box) -> list:
         return f"{box._rel(p)}: replaced {find!r} → {replace!r} in {hits} run(s)"
 
     # ---- docx ----
-    def read_docx(path: str) -> str:
+    def read_docx(path: str, max_paragraphs: int = 200) -> str:
         from docx import Document
 
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
         doc = Document(str(p))
-        lines = [f"document {box._rel(p)}  ({len(doc.paragraphs)} paragraphs)"]
+        total = len(doc.paragraphs)
+        lines = [f"document {box._rel(p)}  ({total} paragraphs)"]
+        shown = 0
         for para in doc.paragraphs:
+            if shown >= max_paragraphs:
+                lines.append(f"... ({total - max_paragraphs} more paragraphs)")
+                break
             text = para.text.strip()
             if text:
                 lines.append(text)
+                shown += 1
         return _truncate("\n".join(lines))
 
     tools = [
@@ -198,7 +208,13 @@ def build_office_tools(box) -> list:
             "Read a .pptx presentation: outputs each slide's text outline.",
             {
                 "type": "object",
-                "properties": {"path": {"type": "string"}},
+                "properties": {
+                    "path": {"type": "string"},
+                    "max_slides": {
+                        "type": "integer",
+                        "description": "Maximum number of slides to output (default 50).",
+                    },
+                },
                 "required": ["path"],
             },
             read_pptx,
@@ -231,7 +247,13 @@ def build_office_tools(box) -> list:
                 "Read a .docx Word document: outputs its paragraph text.",
                 {
                     "type": "object",
-                    "properties": {"path": {"type": "string"}},
+                    "properties": {
+                        "path": {"type": "string"},
+                        "max_paragraphs": {
+                            "type": "integer",
+                            "description": "Maximum number of non-empty paragraphs to output (default 200).",
+                        },
+                    },
                     "required": ["path"],
                 },
                 read_docx,
