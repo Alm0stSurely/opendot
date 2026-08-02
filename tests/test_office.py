@@ -203,6 +203,25 @@ def test_read_pptx_respects_max_slides(tmp_path):
     assert "more slides" not in full
 
 
+def test_read_pptx_negative_cap_clamps_to_none(tmp_path):
+    """A negative cap means 'show none', not garbage arithmetic (e.g. '6 more' for
+    a 5-slide deck). It clamps to 0, so the count in the notice stays correct."""
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    tb, wd, _ = _tb(tmp_path)
+    prs = Presentation()
+    for n in range(1, 6):  # 5 slides
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        shape = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+        shape.text_frame.text = f"Slide {n} body"
+    prs.save(wd / "big.pptx")
+
+    out = tb.call("read_pptx", {"path": "big.pptx", "max_slides": -1})
+    assert "Slide 1 body" not in out  # nothing shown
+    assert "... (5 more slides)" in out  # correct count, not "6 more"
+
+
 def test_read_docx_respects_max_paragraphs(tmp_path):
     pytest.importorskip("docx")
     from docx import Document

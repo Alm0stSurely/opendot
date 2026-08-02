@@ -193,8 +193,6 @@ those, rather than pretending otherwise.
 **Skipping the snapshot on purpose.** When opendot runs a shell command it
 snapshots first — but for something you *want* gone (securely wiping a secret) or
 a huge throwaway file, that snapshot would keep a recoverable copy in the store.
-Set `OPENDOT_MAX_TOOL_OUTPUT` to change the per-tool output character cap (default `30000`). Non-integer or non-positive values keep the default.
-
 Prefixing the command opendot runs with `OPENDOT_NO_SNAPSHOT=1` skips the
 snapshot for that one command:
 
@@ -207,6 +205,10 @@ snapshot backs it). This only affects commands opendot itself runs; anything you
 run in your own shell outside opendot is never snapshotted or logged either way.
 To exclude paths from snapshotting permanently, use the `skip:` rule in
 `OPENDOT.md`.
+
+**Tool output cap.** Tool results are truncated so one huge file can't blow the
+context. Set `OPENDOT_MAX_TOOL_OUTPUT` to change the per-tool character cap
+(default `30000`); non-integer or non-positive values keep the default.
 
 ## Contributing
 

@@ -58,6 +58,7 @@ def build_office_tools(box) -> list:
     def read_xlsx(path: str, sheet: str | None = None, max_rows: int = 100) -> str:
         import openpyxl
 
+        max_rows = max(0, max_rows)  # negative cap means "show none"
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
@@ -105,6 +106,7 @@ def build_office_tools(box) -> list:
     def read_pptx(path: str, max_slides: int = 50) -> str:
         from pptx import Presentation
 
+        max_slides = max(0, max_slides)  # negative cap means "show none"
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
@@ -149,6 +151,7 @@ def build_office_tools(box) -> list:
     def read_docx(path: str, max_paragraphs: int = 200) -> str:
         from docx import Document
 
+        max_paragraphs = max(0, max_paragraphs)  # negative cap means "show none"
         p = box._resolve(path)
         if not p.exists():
             return f"error: file not found: {p}"
