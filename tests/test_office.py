@@ -179,3 +179,45 @@ def test_office_edit_outside_declined_is_skipped(tmp_path):
     assert res.startswith("skipped")
     after = openpyxl.load_workbook(outside).active["B2"].value
     assert after == before  # file on disk unchanged
+
+
+def test_read_pptx_respects_max_slides(tmp_path):
+    from pptx import Presentation
+    from pptx.util import Inches
+
+    tb, wd, _ = _tb(tmp_path)
+    prs = Presentation()
+    for n in range(1, 6):  # 5 slides
+        slide = prs.slides.add_slide(prs.slide_layouts[5])
+        shape = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(4), Inches(1))
+        shape.text_frame.text = f"Slide {n} body"
+    prs.save(wd / "big.pptx")
+
+    out = tb.call("read_pptx", {"path": "big.pptx", "max_slides": 3})
+    assert "Slide 3 body" in out
+    assert "Slide 4 body" not in out
+    assert "... (2 more slides)" in out
+
+    full = tb.call("read_pptx", {"path": "big.pptx"})  # default cap is 50
+    assert "Slide 5 body" in full
+    assert "more slides" not in full
+
+
+def test_read_docx_respects_max_paragraphs(tmp_path):
+    pytest.importorskip("docx")
+    from docx import Document
+
+    tb, wd, _ = _tb(tmp_path)
+    doc = Document()
+    for n in range(1, 11):  # 10 paragraphs
+        doc.add_paragraph(f"Paragraph {n}")
+    doc.save(wd / "big.docx")
+
+    out = tb.call("read_docx", {"path": "big.docx", "max_paragraphs": 4})
+    assert "Paragraph 4" in out
+    assert "Paragraph 5" not in out
+    assert "... (6 more paragraphs)" in out
+
+    full = tb.call("read_docx", {"path": "big.docx"})  # default cap is 200
+    assert "Paragraph 10" in full
+    assert "more paragraphs" not in full
