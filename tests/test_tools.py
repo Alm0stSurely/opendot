@@ -89,6 +89,28 @@ def test_edit_replaces_and_reports(tmp_path):
     assert (wd / "src" / "b.py").read_text() == "z = 99\n"
 
 
+def test_edit_positive_count_limits_replacements(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    target = wd / "src" / "b.py"
+    target.write_text("z = 3\nz = 3\nz = 3\n")
+
+    out = tb.call("edit", {"path": "src/b.py", "find": "z = 3", "replace": "z = 99", "count": 1})
+
+    assert "1 replacement" in out
+    assert target.read_text() == "z = 99\nz = 3\nz = 3\n"
+
+
+def test_edit_negative_count_replaces_all_and_reports_actual_count(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    target = wd / "src" / "b.py"
+    target.write_text("z = 3\nz = 3\nz = 3\n")
+
+    out = tb.call("edit", {"path": "src/b.py", "find": "z = 3", "replace": "z = 99", "count": -1})
+
+    assert "3 replacement" in out
+    assert target.read_text() == "z = 99\nz = 99\nz = 99\n"
+
+
 def test_edit_missing_find_is_error_no_change(tmp_path):
     tb, wd, _ = _tb(tmp_path)
     before = (wd / "src" / "b.py").read_text()
