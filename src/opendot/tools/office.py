@@ -203,7 +203,10 @@ def build_office_tools(box) -> list:
                 "type": "object",
                 "properties": {
                     "path": {"type": "string"},
-                    "max_slides": {"type": "integer"},
+                    "max_slides": {
+                        "type": "integer",
+                        "description": "Max slides to output (default 50).",
+                    },
                 },
                 "required": ["path"],
             },
@@ -239,7 +242,10 @@ def build_office_tools(box) -> list:
                     "type": "object",
                     "properties": {
                         "path": {"type": "string"},
-                        "max_paragraphs": {"type": "integer"},
+                        "max_paragraphs": {
+                            "type": "integer",
+                            "description": "Max paragraphs to output (default 200).",
+                        },
                     },
                     "required": ["path"],
                 },
