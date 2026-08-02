@@ -380,7 +380,7 @@ class Toolbox:
                 )
             new = text.replace(find, replace, count if count > 0 else -1)
             p.write_text(new, encoding="utf-8")
-            replaced = n if count == 0 else min(n, count)
+            replaced = n if count <= 0 else min(n, count)
             rel = self._rel(p)
             return f"edited {rel} ({replaced} replacement(s))\n" + _unified_diff(text, new, rel)
 
