@@ -35,6 +35,23 @@ def test_grep_no_match(tmp_path):
     assert tb.call("grep", {"pattern": "nonexistent_xyz"}) == "no matches"
 
 
+def test_grep_ignore_case(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+
+    # ignore_case=True matches the lowercase pattern against the file's "TODO"
+    out = tb.call("grep", {"pattern": "todo", "ignore_case": True})
+    assert "TODO" in out
+
+    # default is case-sensitive: "todo" must NOT match "TODO"
+    assert tb.call("grep", {"pattern": "todo"}) == "no matches"
+
+
+def test_grep_schema_exposes_ignore_case(tmp_path):
+    tb, _, _ = _tb(tmp_path)
+    specs = {s["function"]["name"]: s["function"]["parameters"] for s in tb.specs()}
+    assert "ignore_case" in specs["grep"]["properties"]
+
+
 def test_glob(tmp_path):
     tb, wd, _ = _tb(tmp_path)
     out = tb.call("glob", {"pattern": "**/*.py"})
