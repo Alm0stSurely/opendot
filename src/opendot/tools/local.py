@@ -448,6 +448,10 @@ class Toolbox:
                             "description": "Dir or file to search (default '.').",
                         },
                         "max_matches": {"type": "integer"},
+                        "ignore_case": {
+                            "type": "boolean",
+                            "description": "Case-insensitive search (default false).",
+                        },
                     },
                     "required": ["pattern"],
                 },
