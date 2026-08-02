@@ -42,6 +42,28 @@ def test_glob(tmp_path):
     assert "README.md" not in out
 
 
+def test_list_files_shows_sizes(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("list_files", {"path": "."})
+    # files show a human-readable size; README.md is "hello\n" = 6 bytes
+    assert "README.md (6 B)" in out
+    # directories are marked with a trailing slash and carry no size
+    assert "src/" in out
+    assert "src/ (" not in out
+
+
+def test_list_files_survives_unreadable_entry(tmp_path):
+    """A broken symlink (stat() raises) must not crash the whole listing — the
+    entry is shown without a size instead."""
+    import os
+
+    tb, wd, _ = _tb(tmp_path)
+    os.symlink(wd / "does-not-exist", wd / "dangling")
+    out = tb.call("list_files", {"path": "."})
+    assert "dangling" in out  # listed, no crash
+    assert "README.md (6 B)" in out  # readable files still get sizes
+
+
 def test_edit_replaces_and_reports(tmp_path):
     tb, wd, _ = _tb(tmp_path)
     out = tb.call("edit", {"path": "src/b.py", "find": "z = 3", "replace": "z = 99"})
