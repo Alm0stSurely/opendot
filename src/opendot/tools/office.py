@@ -166,7 +166,10 @@ def build_office_tools(box) -> list:
                 "properties": {
                     "path": {"type": "string"},
                     "sheet": {"type": "string"},
-                    "max_rows": {"type": "integer"},
+                    "max_rows": {
+                        "type": "integer",
+                        "description": "Max rows to print per sheet (default 100).",
+                    },
                 },
                 "required": ["path"],
             },
