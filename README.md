@@ -193,6 +193,8 @@ those, rather than pretending otherwise.
 **Skipping the snapshot on purpose.** When opendot runs a shell command it
 snapshots first — but for something you *want* gone (securely wiping a secret) or
 a huge throwaway file, that snapshot would keep a recoverable copy in the store.
+Set `OPENDOT_MAX_TOOL_OUTPUT` to change the per-tool output character cap (default `30000`). Non-integer or non-positive values keep the default.
+
 Prefixing the command opendot runs with `OPENDOT_NO_SNAPSHOT=1` skips the
 snapshot for that one command:
 

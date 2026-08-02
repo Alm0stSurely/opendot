@@ -156,3 +156,37 @@ def test_read_file_directory_returns_clear_error(tmp_path):
     assert "is a directory" in out
     assert "list_files" in out
     assert "IsADirectoryError" not in out
+
+
+def test_max_output_default_when_unset(monkeypatch):
+    """The tool-output cap defaults to 30000 when OPENDOT_MAX_TOOL_OUTPUT is unset."""
+    from opendot.tools.local import _max_output
+
+    monkeypatch.delenv("OPENDOT_MAX_TOOL_OUTPUT", raising=False)
+    assert _max_output() == 30_000
+
+
+def test_max_output_honors_valid_override(monkeypatch):
+    from opendot.tools.local import _max_output
+
+    monkeypatch.setenv("OPENDOT_MAX_TOOL_OUTPUT", "500")
+    assert _max_output() == 500
+
+
+def test_max_output_falls_back_on_invalid_or_nonpositive(monkeypatch):
+    """Non-integer and non-positive values keep the 30000 default."""
+    from opendot.tools.local import _max_output
+
+    for bad in ("not-a-number", "0", "-5"):
+        monkeypatch.setenv("OPENDOT_MAX_TOOL_OUTPUT", bad)
+        assert _max_output() == 30_000, f"{bad!r} should fall back to the default"
+
+
+def test_truncate_respects_env_override(tmp_path, monkeypatch):
+    """_truncate uses the configured cap, so a lower override truncates sooner."""
+    from opendot.tools.local import _truncate
+
+    monkeypatch.setenv("OPENDOT_MAX_TOOL_OUTPUT", "10")
+    out = _truncate("x" * 50)
+    assert out.startswith("x" * 10)
+    assert "truncated" in out
