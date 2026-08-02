@@ -287,13 +287,21 @@ class Toolbox:
             except Exception as exc:  # noqa: BLE001
                 return f"error running command: {exc}"
 
-        def grep(pattern: str, path: str = ".", max_matches: int = 100) -> str:
+        def grep(
+            pattern: str,
+            path: str = ".",
+            max_matches: int = 100,
+            ignore_case: bool = False,
+        ) -> str:
             """Search file contents for a regex, returning path:line:text matches."""
             import re
 
             base = self._resolve(path)
             try:
-                rx = re.compile(pattern)
+                rx = re.compile(
+                    pattern,
+                    re.IGNORECASE if ignore_case else 0,
+                )
             except re.error as exc:
                 return f"error: bad pattern: {exc}"
             hits: list[str] = []

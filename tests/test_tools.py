@@ -34,6 +34,19 @@ def test_grep_no_match(tmp_path):
     tb, wd, _ = _tb(tmp_path)
     assert tb.call("grep", {"pattern": "nonexistent_xyz"}) == "no matches"
 
+def test_grep_ignore_case(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+
+    out = tb.call(
+        "grep",
+        {
+            "pattern": "todo",
+            "ignore_case": True,
+        },
+    )
+
+    assert "TODO" in out
+
 
 def test_glob(tmp_path):
     tb, wd, _ = _tb(tmp_path)
