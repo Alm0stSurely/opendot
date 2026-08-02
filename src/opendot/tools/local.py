@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
+
 def _max_output() -> int:
     """Cap tool output so one huge file can't blow the context.
 
