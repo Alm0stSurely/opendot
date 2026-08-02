@@ -313,6 +313,92 @@ def test_ledger_clear_wipes_history(tmp_path):
     assert rev.clear_history() == 0
 
 
+def test_ledger_records_model_and_params(tmp_path):
+    """Each action records the model + sampling params that drove it (issue #31)."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    rev = Reversibility(
+        workdir=str(wd),
+        rules=load_rules(str(wd)),
+        model="claude-sonnet-4-5",
+        params={"temperature": 0.2},
+    )
+    rev.before_action("write", "a.txt", reversible=True)  # snapshot path
+    rev.before_action("shell", "shred x", snapshot=False)  # no-snapshot path
+
+    entries = rev.history()
+    assert len(entries) == 2
+    for e in entries:  # both paths stamp model + params
+        assert e.model == "claude-sonnet-4-5"
+        assert e.params == {"temperature": 0.2}
+
+
+def test_ledger_model_defaults_empty_when_unset(tmp_path):
+    """A Reversibility with no model (direct CLI action) records empty model/params
+    — behavior unchanged from before the field existed."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+    rev.before_action("write", "a.txt", reversible=True)
+
+    e = rev.history()[-1]
+    assert e.model == ""
+    assert e.params == {}
+
+
+def test_ledger_reads_legacy_entries_without_model(tmp_path):
+    """Ledger lines written before model/params existed must still load, with the
+    new fields falling back to their defaults."""
+    import json
+
+    from opendot.reversibility import ledger
+    from opendot.reversibility.snapshots import project_id_for
+
+    wd = _workspace(tmp_path)
+    pid = project_id_for(str(wd))
+    path = ledger._ledger_path(pid)
+    # an old-format line (no model/params) and a newer line that also carries an
+    # unknown future key — both must load without error
+    path.write_text(
+        json.dumps({"id": "1", "kind": "write", "detail": "old.txt", "snapshot_before": "1"})
+        + "\n"
+        + json.dumps(
+            {
+                "id": "2",
+                "kind": "shell",
+                "detail": "cmd",
+                "snapshot_before": "",
+                "model": "m",
+                "params": {},
+                "future_field": "ignored",
+            }
+        )
+        + "\n"
+    )
+    entries = ledger.read_all(pid)
+    assert len(entries) == 2
+    assert entries[0].model == "" and entries[0].params == {}  # legacy defaults
+    assert entries[1].model == "m"  # newer line still loads (unknown key dropped)
+
+
+def test_agent_wires_model_into_reversibility(tmp_path, monkeypatch):
+    """The agent loop stamps its configured model + set params onto the ledger."""
+    monkeypatch.setenv("OPENDOT_HOME", str(tmp_path / "store"))
+    from opendot.agent.config import AgentConfig
+    from opendot.agent.loop import Agent
+
+    wd = _workspace(tmp_path)
+    agent = Agent(AgentConfig(model="gpt-5.1", workdir=str(wd), temperature=0.5))
+    assert agent.reversibility.model == "gpt-5.1"
+    assert agent.reversibility.params == {"temperature": 0.5}
+    # api_base unset → not included (params stay tidy)
+    assert "api_base" not in agent.reversibility.params
+
+
 def test_undo_reports_changed_lockfile(tmp_path):
     """Undoing across a lockfile change must report it, so the caller can warn
     that the environment isn't restored (only the declared versions)."""

@@ -144,6 +144,9 @@ def _cmd_log(workdir: str, clear: bool = False) -> None:
         console.print(f"  {e.id}  {mark}  [cyan]{e.kind}[/cyan]  {detail}")
         if e.note:
             console.print(f"        [dim]{e.note}[/dim]")
+        if e.model:
+            params = "".join(f" {k}={v}" for k, v in e.params.items())
+            console.print(f"        [dim]model: {e.model}{params}[/dim]")
     console.print("\n[dim]opendot undo           revert the last action[/dim]")
     console.print("[dim]opendot undo <id>      restore the workspace to before that action[/dim]")
 

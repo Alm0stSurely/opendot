@@ -79,8 +79,22 @@ class Agent:
         from opendot.reversibility.engine import Reversibility
         from opendot.reversibility.rules import load_rules
 
+        # Record which model + sampling params drove each action, for a fully
+        # auditable ledger. Only include params that are actually set, so entries
+        # stay tidy and the default case adds nothing.
+        params = {
+            k: v
+            for k, v in (
+                ("temperature", self.config.temperature),
+                ("api_base", self.config.api_base),
+            )
+            if v is not None
+        }
         self.reversibility = Reversibility(
-            workdir=self.config.workdir, rules=load_rules(self.config.workdir)
+            workdir=self.config.workdir,
+            rules=load_rules(self.config.workdir),
+            model=self.config.model,
+            params=params,
         )
         self.toolbox = Toolbox(
             self.config.workdir,

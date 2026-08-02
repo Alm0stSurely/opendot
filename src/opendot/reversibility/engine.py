@@ -25,6 +25,11 @@ class Reversibility:
     workdir: str
     rules: IgnoreRules
     enabled: bool = True
+    # The model + sampling params driving the session, stamped into every ledger
+    # entry for a fully auditable trail. Set by the agent loop; empty for direct
+    # CLI actions with no model behind them.
+    model: str = ""
+    params: dict = field(default_factory=dict)
     # Lockfiles changed by the most recent undo (see undo_last). Lets the UI warn
     # that the environment isn't restored until the package manager is re-run.
     last_changed_lockfiles: list[str] = field(default_factory=list)
@@ -70,6 +75,8 @@ class Reversibility:
                     reversible=False,
                     note=note,
                     timestamp=timestamp,
+                    model=self.model,
+                    params=dict(self.params),
                 ),
             )
             return entry_id
@@ -90,6 +97,8 @@ class Reversibility:
                 reversible=reversible,
                 note=note,
                 timestamp=timestamp,
+                model=self.model,
+                params=dict(self.params),
             ),
         )
         return snap.id

@@ -13,7 +13,7 @@ deterministic/testable); callers pass a timestamp string or leave it blank.
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Literal
 
@@ -31,6 +31,12 @@ class LedgerEntry:
     reversible: bool = True
     note: str = ""  # e.g. "escapes workspace: git push"
     timestamp: str = ""
+    # Which model + sampling params drove this action, for a fully auditable trail
+    # ("what did it do" now includes "which model, with what settings"). Both
+    # optional and default-empty so ledgers written before this field still load,
+    # and non-agent callers (CLI direct actions) can omit them.
+    model: str = ""
+    params: dict = field(default_factory=dict)
 
 
 def _ledger_path(project_id: str) -> Path:
@@ -48,12 +54,17 @@ def read_all(project_id: str) -> list[LedgerEntry]:
     path = _ledger_path(project_id)
     if not path.exists():
         return []
+    known = {f.name for f in fields(LedgerEntry)}
     entries: list[LedgerEntry] = []
     for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
-        entries.append(LedgerEntry(**json.loads(line)))
+        # Keep only fields this version knows about, so ledgers written by an
+        # older opendot (missing model/params) or a newer one (extra keys) both
+        # load. Missing fields fall back to the dataclass defaults.
+        raw = {k: v for k, v in json.loads(line).items() if k in known}
+        entries.append(LedgerEntry(**raw))
     return entries
 
 
