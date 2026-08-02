@@ -154,10 +154,13 @@ class Toolbox:
     def _build(self) -> list[Tool]:
         def _format_size(num_bytes: int) -> str:
             if num_bytes < 1024:
-               return f"{num_bytes} B"
+                return f"{num_bytes} B"
             if num_bytes < 1024 * 1024:
-               return f"{num_bytes / 1024:.1f} KB"
-            return f"{num_bytes / (1024 * 1024):.1f} MB"
+                return f"{num_bytes / 1024:.1f} KB"
+            if num_bytes < 1024 * 1024 * 1024:
+                return f"{num_bytes / (1024 * 1024):.1f} MB"
+            return f"{num_bytes / (1024 * 1024 * 1024):.1f} GB"
+
         def list_files(path: str = ".") -> str:
             base = self._resolve(path)
             if not base.exists():
@@ -174,8 +177,12 @@ class Toolbox:
                 if e.is_dir():
                     entries.append(f"{e.name}/")
                 else:
-                    size = _format_size(e.stat().st_size)
-                    entries.append(f"{e.name} ({size})")
+                    # A broken symlink or unreadable file shouldn't crash the whole
+                    # listing — just show the name without a size.
+                    try:
+                        entries.append(f"{e.name} ({_format_size(e.stat().st_size)})")
+                    except OSError:
+                        entries.append(e.name)
             return _truncate("\n".join(entries) or "(empty)")
 
         def read_file(path: str) -> str:
