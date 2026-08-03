@@ -268,3 +268,46 @@ def test_truncate_respects_env_override(tmp_path, monkeypatch):
     out = _truncate("x" * 50)
     assert out.startswith("x" * 10)
     assert "truncated" in out
+
+
+def test_run_shell_uses_default_timeout_when_env_unset(tmp_path):
+    """Without OPENDOT_SHELL_TIMEOUT, a command that finishes quickly succeeds."""
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("run_shell", {"command": "echo hello"})
+    assert "hello" in out
+    assert "[exit 0]" in out
+
+
+def test_run_shell_uses_opendot_shell_timeout_env_var(tmp_path, monkeypatch):
+    """OPENDOT_SHELL_TIMEOUT overrides the default timeout."""
+    monkeypatch.setenv("OPENDOT_SHELL_TIMEOUT", "1")
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("run_shell", {"command": "sleep 2"})
+    assert "timed out after 1s" in out
+
+
+def test_run_shell_invalid_env_var_falls_back_to_default(tmp_path, monkeypatch):
+    """A non-numeric OPENDOT_SHELL_TIMEOUT is ignored, falling back to 120s."""
+    monkeypatch.setenv("OPENDOT_SHELL_TIMEOUT", "not-a-number")
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("run_shell", {"command": "sleep 0.1"})
+    assert "[exit 0]" in out
+    assert "timed out" not in out
+
+
+def test_run_shell_per_call_timeout_overrides_env_var(tmp_path, monkeypatch):
+    """An explicit timeout argument still takes precedence over the env default."""
+    monkeypatch.setenv("OPENDOT_SHELL_TIMEOUT", "600")
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("run_shell", {"command": "sleep 0.1", "timeout": 1})
+    assert "[exit 0]" in out
+    assert "timed out" not in out
+
+
+def test_run_shell_non_positive_env_var_falls_back(tmp_path, monkeypatch):
+    """Zero or negative OPENDOT_SHELL_TIMEOUT is treated as invalid."""
+    monkeypatch.setenv("OPENDOT_SHELL_TIMEOUT", "0")
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("run_shell", {"command": "sleep 0.1"})
+    assert "[exit 0]" in out
+    assert "timed out" not in out
