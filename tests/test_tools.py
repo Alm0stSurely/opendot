@@ -81,6 +81,23 @@ def test_list_files_survives_unreadable_entry(tmp_path):
     assert "README.md (6 B)" in out  # readable files still get sizes
 
 
+def test_list_files_ignores_same_dirs_as_grep_and_glob(tmp_path):
+    """list_files must hide the same noise dirs that grep/glob skip (issue #58).
+
+    Previously list_files used its own ad-hoc filter and surfaced .venv and
+    .opendot, which grep/glob (via the shared _IGNORE set) hide."""
+    tb, wd, _ = _tb(tmp_path)
+    for name in (".venv", "venv", ".opendot", "node_modules", "__pycache__"):
+        (wd / name).mkdir()
+    (wd / "keep").mkdir()
+
+    out = tb.call("list_files", {"path": "."})
+
+    for name in (".venv", "venv", ".opendot", "node_modules", "__pycache__"):
+        assert f"{name}/" not in out
+    assert "keep/" in out  # non-ignored dirs are still listed
+
+
 def test_edit_replaces_and_reports(tmp_path):
     tb, wd, _ = _tb(tmp_path)
     out = tb.call("edit", {"path": "src/b.py", "find": "z = 3", "replace": "z = 99"})

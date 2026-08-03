@@ -182,10 +182,7 @@ class Toolbox:
                 return str(base)
             entries = []
             for e in sorted(base.iterdir()):
-                if e.name.startswith(".git") or e.name in {
-                    "node_modules",
-                    "__pycache__",
-                }:
+                if e.name in self._IGNORE:
                     continue
                 if e.is_dir():
                     entries.append(f"{e.name}/")
