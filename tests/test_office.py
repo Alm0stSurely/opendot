@@ -37,6 +37,16 @@ def _make_xlsx(path):
     wb.save(path)
 
 
+def _add_xlsx_sheet(path):
+    import openpyxl
+
+    wb = openpyxl.load_workbook(path)
+    ws = wb.create_sheet("Summary")
+    ws["A1"] = "total"
+    ws["B1"] = 100
+    wb.save(path)
+
+
 def _make_pptx(path):
     from pptx import Presentation
     from pptx.util import Inches
@@ -100,6 +110,41 @@ def test_read_and_edit_xlsx(tmp_path):
 
     wb = openpyxl.load_workbook(wd / "data.xlsx")
     assert wb.active["B2"].value == 120  # coerced to int
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments"),
+    [
+        ("read_xlsx", {}),
+        ("edit_cell", {"cell": "A1", "value": "changed"}),
+    ],
+)
+def test_invalid_xlsx_sheet_lists_available_sheets(tmp_path, tool_name, arguments):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    _add_xlsx_sheet(wd / "data.xlsx")
+
+    out = tb.call(tool_name, {"path": "data.xlsx", "sheet": "Nope", **arguments})
+    assert out == "error: no sheet 'Nope'; sheets: Sheet, Summary"
+
+
+def test_read_and_edit_xlsx_explicit_sheet(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    _add_xlsx_sheet(wd / "data.xlsx")
+
+    out = tb.call("read_xlsx", {"path": "data.xlsx", "sheet": "Summary"})
+    assert "total" in out
+
+    res = tb.call(
+        "edit_cell",
+        {"path": "data.xlsx", "sheet": "Summary", "cell": "B1", "value": "120"},
+    )
+    assert "100" in res and "120" in res
+
+    import openpyxl
+
+    assert openpyxl.load_workbook(wd / "data.xlsx")["Summary"]["B1"].value == 120
 
 
 def test_xlsx_edit_is_undoable(tmp_path):
