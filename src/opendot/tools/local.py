@@ -139,6 +139,11 @@ class Toolbox:
         if self.mcp is not None and not read_only:
             self._mcp_tools = {t.qualified: t for t in self.mcp.tools}
 
+    def forget_mcp_server(self, server: str) -> None:
+        """Drop a removed MCP server's cached tools so the agent stops offering
+        (and can't call) them for the rest of this session."""
+        self._mcp_tools = {q: t for q, t in self._mcp_tools.items() if t.server != server}
+
     _IGNORE = {".git", "node_modules", "__pycache__", ".venv", "venv", ".opendot"}
 
     # -- resolution / safety helpers --

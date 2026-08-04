@@ -67,6 +67,36 @@ def test_mcp_tool_appears_in_specs(tmp_path):
     assert "mcp__stub__greet" in names
 
 
+def test_toolbox_forget_mcp_server_drops_tools(tmp_path):
+    """After a server is removed, its tools stop appearing in specs and can't be
+    called this session (in-session removal, not just config)."""
+    tb, _ = _tb(tmp_path, lambda p: True)
+    assert "mcp__stub__greet" in {s["function"]["name"] for s in tb.specs()}
+
+    tb.forget_mcp_server("stub")
+    assert "mcp__stub__greet" not in {s["function"]["name"] for s in tb.specs()}
+    assert "unknown tool" in tb.call("mcp__stub__greet", {"name": "x"}).lower()
+
+
+def test_manager_forget_server_purges_in_memory_state():
+    """forget_server drops the server from connected/errors/tools/_sessions so it
+    stops showing and its tools stop being offered until next launch."""
+    from opendot.mcp.manager import MCPManager, MCPTool
+
+    mgr = MCPManager({})
+    mgr.connected = ["stub", "other"]
+    mgr.errors = {"stub": "boom"}
+    mgr._sessions = {"stub": object()}
+    mgr.tools = [MCPTool("stub", "greet", "", {}), MCPTool("other", "ping", "", {})]
+
+    mgr.forget_server("stub")
+
+    assert mgr.connected == ["other"]
+    assert "stub" not in mgr.errors
+    assert "stub" not in mgr._sessions
+    assert [t.server for t in mgr.tools] == ["other"]
+
+
 def test_mcp_call_declined_by_confirm(tmp_path):
     tb, rev = _tb(tmp_path, lambda p: False)
     out = tb.call("mcp__stub__greet", {"name": "x"})

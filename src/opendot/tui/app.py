@@ -522,7 +522,12 @@ class OpendotTUI(App):
     async def _manage_mcp(self) -> None:
         import asyncio
 
-        from opendot.mcp import add_mcp_server, authorize_oauth_server, load_mcp_config
+        from opendot.mcp import (
+            add_mcp_server,
+            authorize_oauth_server,
+            load_mcp_config,
+            remove_mcp_server,
+        )
 
         servers = load_mcp_config()
         mgr = getattr(self.agent, "mcp", None)
@@ -544,11 +549,40 @@ class OpendotTUI(App):
         items.append(("__add__", "➕ Add a server…", ""))
 
         chosen = await self.push_screen_wait(SearchListModal("MCP servers", items))
+
+        if not chosen:
+            return
+
         if chosen != "__add__":
-            return  # selecting a server is view-only for now
+            name = chosen.removeprefix("server:")
+
+            actions = [
+                ("remove", "🗑 Remove server", "Actions"),
+                ("keep", "Keep", "Actions"),
+            ]
+
+            action = await self.push_screen_wait(SearchListModal(f"MCP server: {name}", actions))
+
+            if action == "remove":
+                if remove_mcp_server(name):
+                    # Drop it from the live session too, so it disappears from the
+                    # sidebar and its tools stop being callable without a restart.
+                    if mgr is not None:
+                        mgr.forget_server(name)
+                    if self.agent.toolbox is not None:
+                        self.agent.toolbox.forget_mcp_server(name)
+                    self._write(f"✓ removed MCP server '{name}'.", "sys")
+                    self._refresh_sidebar()
+                    await self._manage_mcp()
+                else:
+                    self._write(Text(f"No MCP server named '{name}'."), "err")
+
+            return
+
         result = await self.push_screen_wait(McpAddModal())
         if not result:
             return
+
         name, spec = result["name"], result["spec"]
         add_mcp_server(name, spec)
 

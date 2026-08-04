@@ -256,6 +256,20 @@ class MCPManager:
         fut: Future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return fut.result(timeout=timeout)
 
+    def forget_server(self, name: str) -> None:
+        """Drop a server from the in-memory view (connected list, errors, tools)
+        so it stops appearing and its tools stop being offered this session.
+
+        The underlying session/subprocess is left for the normal shutdown path;
+        this just makes an in-session removal immediately consistent instead of
+        lingering until the next launch.
+        """
+        if name in self.connected:
+            self.connected.remove(name)
+        self.errors.pop(name, None)
+        self._sessions.pop(name, None)
+        self.tools = [t for t in self.tools if t.server != name]
+
     def call_tool(self, server: str, name: str, args: dict[str, Any]) -> str:
         """Call an MCP tool synchronously; return a text result."""
         session = self._sessions.get(server)
