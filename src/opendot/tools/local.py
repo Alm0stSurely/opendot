@@ -346,7 +346,7 @@ class Toolbox:
                         f.read_text(encoding="utf-8", errors="ignore").splitlines(), 1
                     ):
                         if rx.search(line):
-                            rel = f.relative_to(self.workdir)
+                            rel = self._rel(f)
                             hits.append(f"{rel}:{i}:{line.strip()[:200]}")
                             if len(hits) >= max_matches:
                                 return _truncate(

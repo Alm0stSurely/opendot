@@ -35,6 +35,19 @@ def test_grep_no_match(tmp_path):
     assert tb.call("grep", {"pattern": "nonexistent_xyz"}) == "no matches"
 
 
+def test_grep_outside_workspace_returns_matches(tmp_path):
+    # Regression: an absolute path outside workdir used to raise ValueError from
+    # Path.relative_to; it must now return matches (shown with the absolute path).
+    tb, wd, _ = _tb(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    target = outside / "c.py"
+    target.write_text("marker_outside = 1\n")
+    out = tb.call("grep", {"pattern": "marker_outside", "path": str(outside)})
+    assert "marker_outside" in out
+    assert str(target) in out
+
+
 def test_grep_ignore_case(tmp_path):
     tb, wd, _ = _tb(tmp_path)
 
