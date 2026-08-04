@@ -311,3 +311,27 @@ def test_run_shell_non_positive_env_var_falls_back(tmp_path, monkeypatch):
     out = tb.call("run_shell", {"command": "sleep 0.1"})
     assert "[exit 0]" in out
     assert "timed out" not in out
+
+
+def test_run_shell_zero_timeout_argument_uses_default(tmp_path):
+    """An explicit timeout=0 should not time out instantly; it should fall back to
+    the default so the model gets a useful command result."""
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("run_shell", {"command": "sleep 0.1", "timeout": 0})
+    assert "[exit 0]" in out
+    assert "timed out" not in out
+
+
+def test_run_shell_negative_timeout_argument_uses_default(tmp_path):
+    """An explicit negative timeout should also fall back to the default."""
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("run_shell", {"command": "sleep 0.1", "timeout": -1})
+    assert "[exit 0]" in out
+    assert "timed out" not in out
+
+
+def test_run_shell_positive_timeout_argument_still_enforced(tmp_path):
+    """A positive per-call timeout still works normally."""
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("run_shell", {"command": "sleep 2", "timeout": 1})
+    assert "timed out after 1s" in out
