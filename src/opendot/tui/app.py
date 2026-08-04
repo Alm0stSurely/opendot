@@ -565,6 +565,12 @@ class OpendotTUI(App):
 
             if action == "remove":
                 if remove_mcp_server(name):
+                    # Drop it from the live session too, so it disappears from the
+                    # sidebar and its tools stop being callable without a restart.
+                    if mgr is not None:
+                        mgr.forget_server(name)
+                    if self.agent.toolbox is not None:
+                        self.agent.toolbox.forget_mcp_server(name)
                     self._write(f"✓ removed MCP server '{name}'.", "sys")
                     self._refresh_sidebar()
                     await self._manage_mcp()
