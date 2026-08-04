@@ -257,7 +257,7 @@ class Toolbox:
             return f"{verb} {rel}\n" + _unified_diff(old, content, rel)
 
         def run_shell(command: str, timeout: int | None = None) -> str:
-            if timeout is None:
+            if timeout is None or timeout <= 0:
                 timeout = _shell_timeout()
             # Escape hatch: prefixing a command with OPENDOT_NO_SNAPSHOT=1 runs it
             # WITHOUT snapshotting first. Use it for things you *want* gone and
@@ -463,7 +463,7 @@ class Toolbox:
                         "command": {"type": "string"},
                         "timeout": {
                             "type": "integer",
-                            "description": "Seconds before timeout (default 120, or OPENDOT_SHELL_TIMEOUT if set).",
+                            "description": "Seconds before timeout. Must be a positive integer; values <= 0 fall back to the default (120s, or OPENDOT_SHELL_TIMEOUT if set).",
                         },
                     },
                     "required": ["command"],
