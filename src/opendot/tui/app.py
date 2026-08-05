@@ -412,6 +412,9 @@ class OpendotTUI(App):
         hint to the transcript and return True (so the caller skips the turn)."""
         import os
 
+        if getattr(self.agent.config, "api_base", None):
+            return False
+
         from opendot.providers import env_var_for
 
         var = env_var_for(self.agent.config.model)
