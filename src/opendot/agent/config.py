@@ -16,13 +16,28 @@ from dataclasses import dataclass, field
 DEFAULT_MODEL = os.environ.get("OPENDOT_MODEL", "gpt-5.1")
 
 
+def _max_steps() -> int:
+    """Default step cap read from ``OPENDOT_MAX_STEPS``.
+
+    Falls back to 40 when the variable is unset or not a positive integer.
+    """
+    raw = os.environ.get("OPENDOT_MAX_STEPS", "40")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 40
+    return value if value > 0 else 40
+
+
 @dataclass
 class AgentConfig:
     """Everything the agent loop needs. Kept minimal for v1."""
 
     model: str = DEFAULT_MODEL
     workdir: str = field(default_factory=os.getcwd)
-    max_steps: int = 40  # hard bound on tool-calling turns per user message
+    # Hard bound on tool-calling turns per user message. Override via the
+    # OPENDOT_MAX_STEPS env var or by passing a value at construction time.
+    max_steps: int = field(default_factory=_max_steps)
     temperature: float | None = None
     system_prompt: str | None = None  # None => use the built-in default
     # Base URL for an OpenAI-compatible server (llama.cpp/llama-server, vLLM,

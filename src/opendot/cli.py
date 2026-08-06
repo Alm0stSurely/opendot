@@ -304,7 +304,7 @@ def _cmd_mcp(args) -> None:
         return
 
 
-async def _run_turn(agent: Agent, message: str, *, rich: bool = True) -> None:
+async def _run_turn(agent: Agent, message: str) -> None:
     """Run one turn, streaming events to the console live.
 
     Reasoning ("thinking") streams dimmed; the answer streams in normal weight;
@@ -541,7 +541,7 @@ def main() -> None:
     if oneshot:
         # Non-interactive: can't prompt, so decline irreversible commands by default.
         agent = _build_agent(args.model, workdir, confirm=lambda _p: False, api_base=args.api_base)
-        asyncio.run(_run_turn(agent, oneshot, rich=False))
+        asyncio.run(_run_turn(agent, oneshot))
     elif args.repl:
         agent = _build_agent(args.model, workdir, confirm=_confirm, api_base=args.api_base)
         _interactive(agent)
