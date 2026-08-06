@@ -239,6 +239,17 @@ def test_write_inside_workspace_stays_reversible(tmp_path):
     assert rev.history()[-1].reversible is True  # in-workspace = undoable
 
 
+def test_write_file_noop_does_not_snapshot_or_report_updated(tmp_path):
+    """Writing identical content must short-circuit: no ledger entry, no 'updated'."""
+    tb, wd, rev = _tb(tmp_path)
+    tb.call("write_file", {"path": "new.txt", "content": "hello"})
+    history_len_after_first = len(rev.history())
+    out = tb.call("write_file", {"path": "new.txt", "content": "hello"})
+    assert "no change" in out
+    assert "updated" not in out
+    assert len(rev.history()) == history_len_after_first
+
+
 def test_read_file_directory_returns_clear_error(tmp_path):
     """read_file on a directory should suggest the right tool instead of a low-level
     IsADirectoryError."""

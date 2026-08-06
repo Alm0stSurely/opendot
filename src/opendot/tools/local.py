@@ -232,6 +232,9 @@ class Toolbox:
                     old = p.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     old = ""
+            if old and old == content:
+                rel = self._rel(p)
+                return f"no change to {rel} (content identical)\n"
             # A write outside the working dir isn't covered by the snapshot, so it
             # can't be undone. Confirm first and record it honestly as irreversible,
             # exactly like an escaping shell command. Never claim a lying undo.
