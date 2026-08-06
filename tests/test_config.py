@@ -1,7 +1,5 @@
 """Tests for agent configuration defaults and env-var overrides."""
 
-import pytest
-
 from opendot.agent.config import AgentConfig, _max_steps
 
 
