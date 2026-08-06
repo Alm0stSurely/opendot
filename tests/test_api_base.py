@@ -182,6 +182,9 @@ def test_spurious_warning_for_local_api_base(monkeypatch):
 
 def test_warning_for_missing_key_with_no_api_base(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # --api-base defaults to $OPENAI_API_BASE via argparse; clear it so the test
+    # is hermetic (otherwise a dev/CI machine with it set would skip the warning).
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
     monkeypatch.setattr(sys, "argv", ["opendot", "--model", "gpt-4o", "--repl"])
 
     called = []
@@ -205,4 +208,3 @@ def test_warning_for_missing_key_with_no_api_base(monkeypatch):
     cli.main()
 
     assert called == ["gpt-4o"]
-
