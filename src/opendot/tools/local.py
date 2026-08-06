@@ -227,11 +227,19 @@ class Toolbox:
         def write_file(path: str, content: str) -> str:
             p = self._resolve(path)
             old = ""
+            read_ok = False  # did we actually read the existing file's content?
             if p.exists():
                 try:
                     old = p.read_text(encoding="utf-8", errors="replace")
+                    read_ok = True
                 except OSError:
                     old = ""
+            # No-op: the file exists, we read it, and the content is identical (an
+            # existing empty file re-written as "" counts too). Skip the snapshot
+            # and rewrite so the undo ledger isn't polluted with a phantom change.
+            if read_ok and old == content:
+                rel = self._rel(p)
+                return f"no change to {rel} (content identical)\n"
             # A write outside the working dir isn't covered by the snapshot, so it
             # can't be undone. Confirm first and record it honestly as irreversible,
             # exactly like an escaping shell command. Never claim a lying undo.
