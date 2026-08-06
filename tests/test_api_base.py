@@ -15,8 +15,10 @@ Completion calls are stubbed with a fake LiteLLM, so no real server is contacted
 Patterns mirror ``tests/test_usage.py`` (bare-agent + fake LiteLLM).
 """
 
+import sys
 import types
 
+from opendot import cli
 from opendot.agent.config import AgentConfig
 from opendot.agent.loop import Agent
 from opendot.agent.usage import Usage
@@ -145,3 +147,64 @@ def test_no_api_base_triggers_provider_autodetect(tmp_path, monkeypatch):
     agent = cli._build_agent("gpt-4o", str(tmp_path), api_base=None)
 
     assert agent.config.model == "claude-sonnet-4-5"  # switched via auto-detect
+
+
+def test_spurious_warning_for_local_api_base(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["opendot", "--api-base", API_BASE, "--model", "openai/local-model", "--repl"],
+    )
+
+    called = []
+
+    def fake_warn_if_missing_key(model):
+        called.append(model)
+
+    monkeypatch.setattr(cli, "_warn_if_missing_key", fake_warn_if_missing_key)
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", FakeStdin())
+
+    dummy_object = "dummy"
+    monkeypatch.setattr(cli, "_build_agent", lambda model, workdir, confirm, api_base: dummy_object)
+
+    monkeypatch.setattr(cli, "_interactive", lambda agent: None)
+
+    cli.main()
+
+    assert called == []
+
+
+def test_warning_for_missing_key_with_no_api_base(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    # --api-base defaults to $OPENAI_API_BASE via argparse; clear it so the test
+    # is hermetic (otherwise a dev/CI machine with it set would skip the warning).
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)
+    monkeypatch.setattr(sys, "argv", ["opendot", "--model", "gpt-4o", "--repl"])
+
+    called = []
+
+    def fake_warn_if_missing_key(model):
+        called.append(model)
+
+    monkeypatch.setattr(cli, "_warn_if_missing_key", fake_warn_if_missing_key)
+
+    class FakeStdin:
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", FakeStdin())
+
+    dummy_object = "dummy"
+    monkeypatch.setattr(cli, "_build_agent", lambda model, workdir, confirm, api_base: dummy_object)
+
+    monkeypatch.setattr(cli, "_interactive", lambda agent: None)
+
+    cli.main()
+
+    assert called == ["gpt-4o"]

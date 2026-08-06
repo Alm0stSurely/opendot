@@ -389,7 +389,10 @@ def _interactive(agent: Agent) -> None:
             if len(parts) > 1:
                 agent.config.model = parts[1].strip()
                 console.print(f"model → [cyan]{agent.config.model}[/cyan]")
-                _warn_if_missing_key(agent.config.model)
+                # A local api_base needs no provider key, so skip the hint here
+                # too (mirrors the startup guard in main()).
+                if not agent.config.api_base:
+                    _warn_if_missing_key(agent.config.model)
             else:
                 console.print(
                     f"model: [cyan]{agent.config.model}[/cyan]  ([dim]/model <id> to change[/dim])"
@@ -530,7 +533,8 @@ def main() -> None:
         return
 
     # Everything below this point calls a model — hint if the key looks missing.
-    _warn_if_missing_key(args.model)
+    if not args.api_base:
+        _warn_if_missing_key(args.model)
 
     # One-shot: -p flag, or piped stdin.
     oneshot = args.prompt
