@@ -530,7 +530,8 @@ def main() -> None:
         return
 
     # Everything below this point calls a model — hint if the key looks missing.
-    _warn_if_missing_key(args.model)
+    if not args.api_base:
+        _warn_if_missing_key(args.model)
 
     # One-shot: -p flag, or piped stdin.
     oneshot = args.prompt
