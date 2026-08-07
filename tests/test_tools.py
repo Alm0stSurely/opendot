@@ -268,6 +268,49 @@ def test_read_file_directory_returns_clear_error(tmp_path):
     assert "IsADirectoryError" not in out
 
 
+def test_read_file_line_range_returns_numbered_slice(tmp_path):
+    """A 1-based inclusive start/end pair returns the requested lines with line numbers."""
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("read_file", {"path": "src/a.py", "start": 1, "end": 2})
+    assert "1: x = 1  # TODO fix" in out
+    assert "2: y = 2" in out
+    # Default whole-file read should still work when bounds are omitted.
+    whole = tb.call("read_file", {"path": "src/a.py"})
+    assert "1: x = 1  # TODO fix" in whole
+    assert "2: y = 2" in whole
+
+
+def test_read_file_start_only(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("read_file", {"path": "src/a.py", "start": 2})
+    assert out == "2: y = 2"
+
+
+def test_read_file_end_only(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("read_file", {"path": "src/a.py", "end": 1})
+    assert out == "1: x = 1  # TODO fix"
+
+
+def test_read_file_invalid_range_returns_clear_error(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    assert "start cannot be greater than end" in tb.call(
+        "read_file", {"path": "src/a.py", "start": 2, "end": 1}
+    )
+    assert "start must be a positive" in tb.call("read_file", {"path": "src/a.py", "start": 0})
+    assert "end must be a positive" in tb.call("read_file", {"path": "src/a.py", "end": 0})
+    assert "past the end of the file" in tb.call(
+        "read_file", {"path": "src/a.py", "start": 10}
+    )
+
+
+def test_read_file_schema_exposes_start_and_end(tmp_path):
+    tb, _, _ = _tb(tmp_path)
+    specs = {s["function"]["name"]: s["function"]["parameters"] for s in tb.specs()}
+    assert "start" in specs["read_file"]["properties"]
+    assert "end" in specs["read_file"]["properties"]
+
+
 def test_max_output_default_when_unset(monkeypatch):
     """The tool-output cap defaults to 30000 when OPENDOT_MAX_TOOL_OUTPUT is unset."""
     from opendot.tools.local import _max_output
