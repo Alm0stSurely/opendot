@@ -274,10 +274,10 @@ def test_read_file_line_range_returns_numbered_slice(tmp_path):
     out = tb.call("read_file", {"path": "src/a.py", "start": 1, "end": 2})
     assert "1: x = 1  # TODO fix" in out
     assert "2: y = 2" in out
-    # Default whole-file read should still work when bounds are omitted.
+    # A whole-file read (both bounds omitted) is unchanged: raw contents, no
+    # line numbers. Only a requested range slices and numbers lines.
     whole = tb.call("read_file", {"path": "src/a.py"})
-    assert "1: x = 1  # TODO fix" in whole
-    assert "2: y = 2" in whole
+    assert whole == "x = 1  # TODO fix\ny = 2\n"
 
 
 def test_read_file_start_only(tmp_path):
@@ -299,9 +299,7 @@ def test_read_file_invalid_range_returns_clear_error(tmp_path):
     )
     assert "start must be a positive" in tb.call("read_file", {"path": "src/a.py", "start": 0})
     assert "end must be a positive" in tb.call("read_file", {"path": "src/a.py", "end": 0})
-    assert "past the end of the file" in tb.call(
-        "read_file", {"path": "src/a.py", "start": 10}
-    )
+    assert "past the end of the file" in tb.call("read_file", {"path": "src/a.py", "start": 10})
 
 
 def test_read_file_schema_exposes_start_and_end(tmp_path):

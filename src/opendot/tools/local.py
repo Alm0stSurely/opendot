@@ -223,19 +223,24 @@ class Toolbox:
                 return f"error: file not found: {p}"
             if p.is_dir():
                 return f"error: {p} is a directory (use list_files to see its contents)"
+            try:
+                text = p.read_text(encoding="utf-8", errors="replace")
+            except Exception as exc:  # noqa: BLE001
+                return f"error reading {p}: {exc}"
+
+            # No range requested: return the raw file contents unchanged (the
+            # original behavior). Only a requested range slices + numbers lines.
+            if start is None and end is None:
+                return _truncate(text)
+
             if start is not None and start < 1:
                 return "error: start must be a positive 1-based line number"
             if end is not None and end < 1:
                 return "error: end must be a positive 1-based line number"
             if start is not None and end is not None and start > end:
                 return "error: start cannot be greater than end"
-            try:
-                lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
-            except Exception as exc:  # noqa: BLE001
-                return f"error reading {p}: {exc}"
+            lines = text.splitlines()
             file_len = len(lines)
-            if file_len == 0:
-                return "(empty file)"
             first = start if start is not None else 1
             last = end if end is not None else file_len
             if first > file_len:
