@@ -213,16 +213,43 @@ class Toolbox:
                         entries.append(e.name)
             return _truncate("\n".join(entries) or "(empty)")
 
-        def read_file(path: str) -> str:
+        def read_file(
+            path: str,
+            start: int | None = None,
+            end: int | None = None,
+        ) -> str:
             p = self._resolve(path)
             if not p.exists():
                 return f"error: file not found: {p}"
             if p.is_dir():
                 return f"error: {p} is a directory (use list_files to see its contents)"
             try:
-                return _truncate(p.read_text(encoding="utf-8", errors="replace"))
+                text = p.read_text(encoding="utf-8", errors="replace")
             except Exception as exc:  # noqa: BLE001
                 return f"error reading {p}: {exc}"
+
+            # No range requested: return the raw file contents unchanged (the
+            # original behavior). Only a requested range slices + numbers lines.
+            if start is None and end is None:
+                return _truncate(text)
+
+            if start is not None and start < 1:
+                return "error: start must be a positive 1-based line number"
+            if end is not None and end < 1:
+                return "error: end must be a positive 1-based line number"
+            if start is not None and end is not None and start > end:
+                return "error: start cannot be greater than end"
+            lines = text.splitlines()
+            file_len = len(lines)
+            first = start if start is not None else 1
+            last = end if end is not None else file_len
+            if first > file_len:
+                return f"error: start ({first}) is past the end of the file ({file_len} lines)"
+            if last > file_len:
+                return f"error: end ({last}) is past the end of the file ({file_len} lines)"
+            sliced = lines[first - 1 : last]
+            numbered = [f"{first + i}: {line}" for i, line in enumerate(sliced)]
+            return _truncate("\n".join(numbered))
 
         def write_file(path: str, content: str) -> str:
             p = self._resolve(path)
@@ -441,10 +468,20 @@ class Toolbox:
             ),
             Tool(
                 "read_file",
-                "Read a text file's contents.",
+                "Read a text file's contents, optionally by line range (1-based, inclusive).",
                 {
                     "type": "object",
-                    "properties": {"path": {"type": "string"}},
+                    "properties": {
+                        "path": {"type": "string"},
+                        "start": {
+                            "type": "integer",
+                            "description": "First 1-based line to include (defaults to 1).",
+                        },
+                        "end": {
+                            "type": "integer",
+                            "description": "Last 1-based line to include (defaults to EOF).",
+                        },
+                    },
                     "required": ["path"],
                 },
                 read_file,
