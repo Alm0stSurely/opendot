@@ -65,6 +65,61 @@ def test_grep_schema_exposes_ignore_case(tmp_path):
     assert "ignore_case" in specs["grep"]["properties"]
 
 
+def test_grep_schema_exposes_context(tmp_path):
+    tb, _, _ = _tb(tmp_path)
+    specs = {s["function"]["name"]: s["function"]["parameters"] for s in tb.specs()}
+    assert "context" in specs["grep"]["properties"]
+
+
+def test_grep_context_lines_returns_neighbors(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    target = wd / "src" / "a.py"
+    target.write_text("line 1\nline 2\nTODO fix\nline 4\nline 5\n")
+    out = tb.call("grep", {"pattern": "TODO", "context": 2})
+    assert "src/a.py:3:TODO fix" in out
+    assert "src/a.py:1-line 1" in out
+    assert "src/a.py:2-line 2" in out
+    assert "src/a.py:4-line 4" in out
+    assert "src/a.py:5-line 5" in out
+
+
+def test_grep_context_zero_is_default_and_no_context_markers(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    target = wd / "src" / "a.py"
+    target.write_text("line 1\nline 2\nTODO fix\nline 4\n")
+    out = tb.call("grep", {"pattern": "TODO"})
+    assert "src/a.py:3:TODO fix" in out
+    assert "src/a.py:3-" not in out
+    assert "src/a.py:2-" not in out
+
+
+def test_grep_context_respects_max_matches(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    target = wd / "src" / "a.py"
+    target.write_text("A\nTODO one\nB\nC\nTODO two\nD\nE\nTODO three\nF\n")
+    out = tb.call("grep", {"pattern": "TODO", "context": 1, "max_matches": 2})
+    # Two matches plus their immediate neighbors, then a cap marker.
+    assert out.count(":TODO") == 2
+    assert out.count("TODO one") == 1
+    assert out.count("TODO two") == 1
+    assert "TODO three" not in out
+    assert "capped at 2" in out
+
+
+def test_grep_max_matches_is_global_across_files(tmp_path):
+    # The cap counts matches across ALL searched files, not per file. Five files
+    # with one match each and max_matches=2 must yield 2 total: a per-file counter
+    # would never trip (1 < 2 in every file) and leak all 5 through.
+    tb, wd, _ = _tb(tmp_path)
+    grepdir = wd / "src" / "many"
+    grepdir.mkdir()
+    for n in range(5):
+        (grepdir / f"f{n}.py").write_text(f"TODO marker {n}\n")
+    out = tb.call("grep", {"pattern": "TODO marker", "path": "src/many", "max_matches": 2})
+    assert out.count(":TODO marker") == 2
+    assert "capped at 2" in out
+
+
 def test_glob(tmp_path):
     tb, wd, _ = _tb(tmp_path)
     out = tb.call("glob", {"pattern": "**/*.py"})
