@@ -192,26 +192,60 @@ class Toolbox:
                 return f"{num_bytes / (1024 * 1024):.1f} MB"
             return f"{num_bytes / (1024 * 1024 * 1024):.1f} GB"
 
-        def list_files(path: str = ".") -> str:
+        def _entry_line(e: Path, name: str) -> str:
+            """Format one listing line: dirs get a trailing '/', files get a size.
+            A broken symlink or unreadable file shouldn't crash the listing — just
+            show the name without a size."""
+            if e.is_dir():
+                return f"{name}/"
+            try:
+                return f"{name} ({_format_size(e.stat().st_size)})"
+            except OSError:
+                return name
+
+        # Cap a recursive listing so an enormous tree can't blow the context. The
+        # per-char _truncate still applies on top; this bounds the entry count.
+        _MAX_RECURSIVE_ENTRIES = 1000
+
+        def list_files(path: str = ".", recursive: bool = False) -> str:
             base = self._resolve(path)
             if not base.exists():
                 return f"error: path does not exist: {base}"
             if base.is_file():
                 return str(base)
+
+            if not recursive:
+                entries = [
+                    _entry_line(e, e.name)
+                    for e in sorted(base.iterdir())
+                    if e.name not in self._IGNORE
+                ]
+                return _truncate("\n".join(entries) or "(empty)")
+
+            # Recursive: os.walk with the same _IGNORE pruning as _walk_files, so it
+            # skips .git/node_modules/.venv/.opendot exactly like grep/glob. Paths are
+            # shown relative to `base` so the tree stays readable.
             entries = []
-            for e in sorted(base.iterdir()):
-                if e.name in self._IGNORE:
-                    continue
-                if e.is_dir():
-                    entries.append(f"{e.name}/")
-                else:
-                    # A broken symlink or unreadable file shouldn't crash the whole
-                    # listing — just show the name without a size.
-                    try:
-                        entries.append(f"{e.name} ({_format_size(e.stat().st_size)})")
-                    except OSError:
-                        entries.append(e.name)
-            return _truncate("\n".join(entries) or "(empty)")
+            truncated = False
+            for dirpath, dirnames, filenames in os.walk(base):
+                dirnames[:] = sorted(d for d in dirnames if d not in self._IGNORE)
+                here = Path(dirpath)
+                for name in dirnames:
+                    rel = str((here / name).relative_to(base))
+                    entries.append(f"{rel}/")
+                for fn in sorted(filenames):
+                    p = here / fn
+                    rel = str(p.relative_to(base))
+                    entries.append(_entry_line(p, rel))
+                    if len(entries) >= _MAX_RECURSIVE_ENTRIES:
+                        truncated = True
+                        break
+                if truncated:
+                    break
+            out = "\n".join(entries) or "(empty)"
+            if truncated:
+                out += f"\n... (listing capped at {_MAX_RECURSIVE_ENTRIES} entries)"
+            return _truncate(out)
 
         def read_file(
             path: str,
@@ -467,14 +501,22 @@ class Toolbox:
         return [
             Tool(
                 "list_files",
-                "List files and directories at a path (relative to the working dir).",
+                "List files and directories at a path (relative to the working dir). "
+                "Set recursive=true to walk subdirectories in one call.",
                 {
                     "type": "object",
                     "properties": {
                         "path": {
                             "type": "string",
                             "description": "Path to list; defaults to '.'.",
-                        }
+                        },
+                        "recursive": {
+                            "type": "boolean",
+                            "description": (
+                                "Walk subdirectories (skipping .git/node_modules/.venv/etc), "
+                                "showing paths relative to the listed dir. Default false."
+                            ),
+                        },
                     },
                 },
                 list_files,
