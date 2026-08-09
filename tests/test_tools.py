@@ -166,6 +166,47 @@ def test_list_files_ignores_same_dirs_as_grep_and_glob(tmp_path):
     assert "keep/" in out  # non-ignored dirs are still listed
 
 
+def test_list_files_recursive_lists_nested_entries(tmp_path):
+    # recursive=True walks subdirectories and shows paths relative to the base,
+    # so a nested file appears with its dir prefix (issue #85).
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("list_files", {"path": ".", "recursive": True})
+    assert "src/" in out
+    assert "src/a.py" in out
+    assert "src/b.py" in out
+    assert "README.md" in out
+
+
+def test_list_files_default_is_top_level_only(tmp_path):
+    # Default (recursive=False) is unchanged: only the top level, so nested files
+    # are not listed with a dir prefix.
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("list_files", {"path": "."})
+    assert "src/" in out
+    assert "src/a.py" not in out  # not descended into
+    assert "src/b.py" not in out
+
+
+def test_list_files_recursive_skips_ignored_dirs(tmp_path):
+    # The recursive walk skips the same _IGNORE dirs as grep/glob, in both modes.
+    tb, wd, _ = _tb(tmp_path)
+    for name in (".venv", ".opendot", "node_modules", "__pycache__"):
+        (wd / name).mkdir()
+        (wd / name / "junk.py").write_text("x = 1\n")
+
+    out = tb.call("list_files", {"path": ".", "recursive": True})
+
+    for name in (".venv", ".opendot", "node_modules", "__pycache__"):
+        assert name not in out  # neither the dir nor its nested junk.py
+    assert "src/a.py" in out  # non-ignored nested files still appear
+
+
+def test_list_files_schema_exposes_recursive(tmp_path):
+    tb, _, _ = _tb(tmp_path)
+    specs = {s["function"]["name"]: s["function"]["parameters"] for s in tb.specs()}
+    assert "recursive" in specs["list_files"]["properties"]
+
+
 def test_edit_replaces_and_reports(tmp_path):
     tb, wd, _ = _tb(tmp_path)
     out = tb.call("edit", {"path": "src/b.py", "find": "z = 3", "replace": "z = 99"})
