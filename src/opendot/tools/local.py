@@ -382,13 +382,13 @@ class Toolbox:
             except re.error as exc:
                 return f"error: bad pattern: {exc}"
             hits: list[str] = []
+            match_count = 0  # counted across all files, so max_matches is a global cap
             roots = [base] if base.is_file() else self._walk_files(base)
             for f in roots:
                 try:
                     lines = f.read_text(encoding="utf-8", errors="ignore").splitlines()
                 except OSError:
                     continue
-                match_count = 0
                 for i, line in enumerate(lines, 1):
                     if not rx.search(line):
                         continue
@@ -401,9 +401,7 @@ class Toolbox:
                         marker = ":" if j == i else "-"
                         hits.append(f"{rel}:{j}{marker}{text}")
                     if match_count >= max_matches:
-                        return _truncate(
-                            "\n".join(hits) + f"\n... (capped at {max_matches})"
-                        )
+                        return _truncate("\n".join(hits) + f"\n... (capped at {max_matches})")
             return _truncate("\n".join(hits)) if hits else "no matches"
 
         def glob(pattern: str) -> str:
@@ -532,7 +530,7 @@ class Toolbox:
             ),
             Tool(
                 "grep",
-                "Search file contents for a regular expression. Returns path:line:text matches.",
+                "Search file contents for a regular expression. Returns path:line:text matches; with context>0, surrounding lines are included as path:line-text.",
                 {
                     "type": "object",
                     "properties": {

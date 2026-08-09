@@ -96,17 +96,27 @@ def test_grep_context_zero_is_default_and_no_context_markers(tmp_path):
 def test_grep_context_respects_max_matches(tmp_path):
     tb, wd, _ = _tb(tmp_path)
     target = wd / "src" / "a.py"
-    target.write_text(
-        "A\nTODO one\nB\n"
-        "C\nTODO two\nD\n"
-        "E\nTODO three\nF\n"
-    )
+    target.write_text("A\nTODO one\nB\nC\nTODO two\nD\nE\nTODO three\nF\n")
     out = tb.call("grep", {"pattern": "TODO", "context": 1, "max_matches": 2})
     # Two matches plus their immediate neighbors, then a cap marker.
     assert out.count(":TODO") == 2
     assert out.count("TODO one") == 1
     assert out.count("TODO two") == 1
     assert "TODO three" not in out
+    assert "capped at 2" in out
+
+
+def test_grep_max_matches_is_global_across_files(tmp_path):
+    # The cap counts matches across ALL searched files, not per file. Five files
+    # with one match each and max_matches=2 must yield 2 total: a per-file counter
+    # would never trip (1 < 2 in every file) and leak all 5 through.
+    tb, wd, _ = _tb(tmp_path)
+    grepdir = wd / "src" / "many"
+    grepdir.mkdir()
+    for n in range(5):
+        (grepdir / f"f{n}.py").write_text(f"TODO marker {n}\n")
+    out = tb.call("grep", {"pattern": "TODO marker", "path": "src/many", "max_matches": 2})
+    assert out.count(":TODO marker") == 2
     assert "capped at 2" in out
 
 
