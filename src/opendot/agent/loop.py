@@ -194,6 +194,8 @@ class Agent:
                         args.get("tasks", []),
                         model=self.config.model,
                         workdir=self.config.workdir,
+                        api_base=self.config.api_base,
+                        temperature=self.config.temperature,
                     ):
                         if ev.type == "tool_end" and ev.tool == "spawn_explorers":
                             result = ev.result  # merged findings

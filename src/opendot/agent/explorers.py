@@ -33,7 +33,9 @@ anything; those tools are not available to you.
 """
 
 
-async def run_explorers(tasks: list[str], *, model: str, workdir: str) -> AsyncIterator[Event]:
+async def run_explorers(
+    tasks: list[str], *, model: str, workdir: str, api_base: str | None = None, temperature: float | None = None
+) -> AsyncIterator[Event]:
     """Run each task as a concurrent read-only subagent, yielding lane-tagged
     events, and finally a merged findings summary the caller can use."""
     from opendot.agent.config import AgentConfig
@@ -55,6 +57,8 @@ async def run_explorers(tasks: list[str], *, model: str, workdir: str) -> AsyncI
                 model=model,
                 workdir=workdir,
                 system_prompt=_EXPLORER_SYSTEM,
+                api_base=api_base,
+                temperature=temperature,
             )
         )
         # Force a read-only toolbox regardless of defaults.
