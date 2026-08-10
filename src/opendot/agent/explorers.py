@@ -34,7 +34,12 @@ anything; those tools are not available to you.
 
 
 async def run_explorers(
-    tasks: list[str], *, model: str, workdir: str, api_base: str | None = None, temperature: float | None = None
+    tasks: list[str],
+    *,
+    model: str,
+    workdir: str,
+    api_base: str | None = None,
+    temperature: float | None = None,
 ) -> AsyncIterator[Event]:
     """Run each task as a concurrent read-only subagent, yielding lane-tagged
     events, and finally a merged findings summary the caller can use."""
