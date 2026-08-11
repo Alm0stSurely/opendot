@@ -245,9 +245,10 @@ class Agent:
             if not usage_counted and getattr(chunk, "usage", None):
                 self.usage.add_response(chunk, litellm, model=self.config.model)
                 usage_counted = True
-            if not getattr(chunk, "choices", None):
+            choices = getattr(chunk, "choices", None)
+            if not choices:
                 continue
-            delta = chunk.choices[0].delta
+            delta = choices[0].delta
             # reasoning models expose reasoning separately
             reasoning = getattr(delta, "reasoning_content", None)
             if reasoning:

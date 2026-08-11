@@ -20,12 +20,6 @@ class _Usage:
     total_tokens = 2
 
 
-class _Delta:
-    content = None
-    reasoning_content = None
-    tool_calls = None
-
-
 class _Choice:
     def __init__(self, content: str | None = None):
         self.delta = types.SimpleNamespace()
@@ -83,8 +77,8 @@ def test_stream_turn_skips_choiceless_chunk():
     assert text_events[0].text == "hello"
 
 
-def test_stream_turn_choiceless_chunk_not_fatal_in_run():
-    """The public `run()` path surfaces the final text, not a model error."""
+def test_stream_turn_choiceless_chunk_not_fatal():
+    """A choice-less chunk yields no error event from the streaming path."""
 
     class _FakeLiteLLM(types.SimpleNamespace):
         async def acompletion(self, **kw):
@@ -94,9 +88,7 @@ def test_stream_turn_choiceless_chunk_not_fatal_in_run():
 
             return gen()
 
-    a = Agent(config=AgentConfig(model="gpt-4o", workdir="/tmp", max_steps=1))
-    # Replace the litellm module in the run with our stub
-    a.messages = [{"role": "system", "content": "s"}]
+    a = _bare_agent()
 
     async def run():
         events = []
