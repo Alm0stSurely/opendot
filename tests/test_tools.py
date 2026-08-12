@@ -266,7 +266,88 @@ def test_new_tools_are_in_specs(tmp_path):
         "write_file",
         "list_files",
         "web_fetch",
+        "move",
     } <= names
+
+
+def test_move_renames_file_and_reports_summary(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/b.py", "dst": "src/renamed.py"})
+    assert "src/b.py -> src/renamed.py" in out
+    assert not (wd / "src" / "b.py").exists()
+    assert (wd / "src" / "renamed.py").read_text() == "z = 3\n"
+
+
+def test_move_creates_parent_dirs_of_dst(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    tb.call("move", {"src": "src/b.py", "dst": "new_dir/nested/b.py"})
+    assert (wd / "new_dir" / "nested" / "b.py").read_text() == "z = 3\n"
+
+
+def test_move_is_undoable(tmp_path):
+    tb, wd, rev = _tb(tmp_path)
+    tb.call("move", {"src": "src/b.py", "dst": "src/renamed.py"})
+    assert (wd / "src" / "renamed.py").exists()
+
+    rev.undo_last()
+
+    assert not (wd / "src" / "renamed.py").exists()
+    assert (wd / "src" / "b.py").read_text() == "z = 3\n"
+
+
+def test_move_missing_src_is_clear_error(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/does_not_exist.py", "dst": "src/renamed.py"})
+    assert "error" in out
+    assert "not found" in out
+    assert not (wd / "src" / "renamed.py").exists()
+
+
+def test_move_existing_dst_is_clear_error_without_overwrite(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/b.py", "dst": "src/a.py"})
+    assert "error" in out
+    assert "already exists" in out
+    # nothing changed
+    assert (wd / "src" / "b.py").exists()
+    assert (wd / "src" / "a.py").read_text() == "x = 1  # TODO fix\ny = 2\n"
+
+
+def test_move_existing_dst_with_overwrite_replaces_it(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/b.py", "dst": "src/a.py", "overwrite": True})
+    assert "src/b.py -> src/a.py" in out
+    assert not (wd / "src" / "b.py").exists()
+    assert (wd / "src" / "a.py").read_text() == "z = 3\n"
+
+
+def test_move_outside_workspace_is_irreversible_and_confirmed(tmp_path):
+    """A move whose destination escapes the workspace isn't covered by the
+    snapshot, so it must be confirmed first and recorded as NOT reversible."""
+    tb, wd, rev = _tb(tmp_path)
+    outside = tmp_path / "outside.py"
+
+    out = tb.call("move", {"src": "src/b.py", "dst": str(outside)})
+    assert "src/b.py ->" in out
+    assert outside.read_text() == "z = 3\n"
+
+    last = rev.history()[-1]
+    assert last.reversible is False
+    assert "not undoable" in last.note
+
+
+def test_declining_outside_move_skips_it(tmp_path):
+    wd = tmp_path / "ws"
+    (wd / "src").mkdir(parents=True)
+    (wd / "src" / "b.py").write_text("z = 3\n")
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: False)  # decline
+
+    outside = tmp_path / "outside.py"
+    out = tb.call("move", {"src": "src/b.py", "dst": str(outside)})
+    assert out.startswith("skipped")
+    assert not outside.exists()
+    assert (wd / "src" / "b.py").exists()  # unchanged
 
 
 def test_web_fetch_returns_markdown(tmp_path, monkeypatch):

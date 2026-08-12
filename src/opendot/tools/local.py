@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -483,6 +484,43 @@ class Toolbox:
             rel = self._rel(p)
             return f"edited {rel} ({replaced} replacement(s))\n" + _unified_diff(text, new, rel)
 
+        def move(src: str, dst: str, overwrite: bool = False) -> str:
+            """Move/rename a file or directory (surgical, undoable).
+
+            Errors on a missing src or an existing dst unless overwrite=True —
+            mirrors the confirm-first-then-record pattern edit/write_file use for
+            paths outside the workspace.
+            """
+            p_src = self._resolve(src)
+            p_dst = self._resolve(dst)
+            if not p_src.exists():
+                return f"error: file not found: {p_src}"
+            if p_dst.exists() and not overwrite:
+                return f"error: destination already exists: {p_dst} (pass overwrite=true to replace it)"
+            # A move touching a path outside the working dir isn't covered by the
+            # snapshot on that side, so it can't be fully undone. Confirm first and
+            # record it honestly as irreversible, exactly like an escaping write/edit.
+            outside = self._is_outside_workspace(p_src) or self._is_outside_workspace(p_dst)
+            rel_src, rel_dst = self._rel(p_src), self._rel(p_dst)
+            if outside and not self._confirm(
+                f"This moves a file outside the workspace and can't be undone:\n"
+                f"  {rel_src} -> {rel_dst}\nMove it?"
+            ):
+                return "skipped: user declined a move outside the workspace"
+            if self.rev is not None:
+                self.rev.before_action(
+                    "write",
+                    f"{rel_src} -> {rel_dst}",
+                    reversible=not outside,
+                    note="outside the workspace — not undoable" if outside else "",
+                )
+            p_dst.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                shutil.move(str(p_src), str(p_dst))
+            except Exception as exc:  # noqa: BLE001
+                return f"error moving {p_src} to {p_dst}: {exc}"
+            return f"{rel_src} -> {rel_dst}"
+
         def web_fetch(url: str) -> str:
             """Fetch an http(s) URL and return its content as LLM-ready markdown
             (structured text, headings, links, tables) via PyScrappy. Read-only:
@@ -625,6 +663,24 @@ class Toolbox:
                     "required": ["path", "find", "replace"],
                 },
                 edit,
+            ),
+            Tool(
+                "move",
+                "Move or rename a file or directory (surgical, undoable). Errors if "
+                "dst already exists unless overwrite=true.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "src": {"type": "string"},
+                        "dst": {"type": "string"},
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "Replace dst if it already exists (default false).",
+                        },
+                    },
+                    "required": ["src", "dst"],
+                },
+                move,
             ),
             Tool(
                 "web_fetch",
