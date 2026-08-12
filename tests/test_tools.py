@@ -321,6 +321,21 @@ def test_move_existing_dst_with_overwrite_replaces_it(tmp_path):
     assert (wd / "src" / "a.py").read_text() == "z = 3\n"
 
 
+def test_move_overwrite_rejects_directory_destination(tmp_path):
+    """overwrite=true must not silently move src INTO an existing directory dst
+    (shutil.move's default behavior) — that contradicts the documented
+    'replace it' semantics of overwrite."""
+    tb, wd, _ = _tb(tmp_path)
+    (wd / "otherdir").mkdir()
+
+    out = tb.call("move", {"src": "src/b.py", "dst": "otherdir", "overwrite": True})
+
+    assert "error" in out
+    assert "directory" in out
+    assert (wd / "src" / "b.py").exists()  # unmoved
+    assert not (wd / "otherdir" / "b.py").exists()  # not moved into the dir either
+
+
 def test_move_outside_workspace_is_irreversible_and_confirmed(tmp_path):
     """A move whose destination escapes the workspace isn't covered by the
     snapshot, so it must be confirmed first and recorded as NOT reversible."""

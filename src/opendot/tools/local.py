@@ -495,8 +495,17 @@ class Toolbox:
             p_dst = self._resolve(dst)
             if not p_src.exists():
                 return f"error: file not found: {p_src}"
-            if p_dst.exists() and not overwrite:
-                return f"error: destination already exists: {p_dst} (pass overwrite=true to replace it)"
+            if p_dst.exists():
+                if not overwrite:
+                    return (
+                        f"error: destination already exists: {p_dst} "
+                        "(pass overwrite=true to replace it)"
+                    )
+                if p_dst.is_dir():
+                    # shutil.move()'s default behavior for a directory dst is to
+                    # move src INTO it, not replace it — that contradicts what
+                    # overwrite=true promises, so reject it explicitly.
+                    return f"error: cannot overwrite a directory: {p_dst}"
             # A move touching a path outside the working dir isn't covered by the
             # snapshot on that side, so it can't be fully undone. Confirm first and
             # record it honestly as irreversible, exactly like an escaping write/edit.
@@ -515,6 +524,14 @@ class Toolbox:
                     note="outside the workspace — not undoable" if outside else "",
                 )
             p_dst.parent.mkdir(parents=True, exist_ok=True)
+            # Remove an existing dst explicitly rather than relying on os.rename's
+            # implicit overwrite (shutil.move's fallback) — that isn't reliable
+            # across platforms (e.g. os.rename raises on Windows if dst exists).
+            if overwrite and p_dst.exists():
+                try:
+                    p_dst.unlink()
+                except OSError as exc:
+                    return f"error removing existing destination {p_dst}: {exc}"
             try:
                 shutil.move(str(p_src), str(p_dst))
             except Exception as exc:  # noqa: BLE001
