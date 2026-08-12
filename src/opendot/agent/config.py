@@ -29,6 +29,20 @@ def _max_steps() -> int:
     return value if value > 0 else 40
 
 
+def _max_retries() -> int:
+    """Default transient-error retry cap read from ``OPENDOT_MAX_RETRIES``.
+
+    Falls back to 3 when the variable is unset or not a non-negative integer.
+    0 is a valid value (retries disabled), unlike ``_max_steps``.
+    """
+    raw = os.environ.get("OPENDOT_MAX_RETRIES", "3")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 3
+    return value if value >= 0 else 3
+
+
 @dataclass
 class AgentConfig:
     """Everything the agent loop needs. Kept minimal for v1."""
@@ -38,6 +52,9 @@ class AgentConfig:
     # Hard bound on tool-calling turns per user message. Override via the
     # OPENDOT_MAX_STEPS env var or by passing a value at construction time.
     max_steps: int = field(default_factory=_max_steps)
+    # Bound on retries for a transient model-call error (rate-limit/5xx/timeout)
+    # before a turn gives up. Override via OPENDOT_MAX_RETRIES.
+    max_retries: int = field(default_factory=_max_retries)
     temperature: float | None = None
     system_prompt: str | None = None  # None => use the built-in default
     # Base URL for an OpenAI-compatible server (llama.cpp/llama-server, vLLM,

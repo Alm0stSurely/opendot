@@ -8,6 +8,7 @@ to the model until it produces a final answer (no more tool calls).
 
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass
 from typing import Any, AsyncIterator
@@ -45,6 +46,11 @@ _SPAWN_EXPLORERS_SPEC = {
 
 class _StreamUnsupported(Exception):
     """Raised when a provider's stream can't yield structured tool calls."""
+
+
+# Cap on the exponential-backoff sleep between retries so a high max_retries
+# can't turn into multi-minute waits before a turn finally gives up.
+_MAX_BACKOFF_SECONDS = 30
 
 
 @dataclass
@@ -149,26 +155,16 @@ class Agent:
             # live, and tool-call deltas are reassembled. Streaming is what makes
             # the UX feel alive. If streaming fails for a provider, fall back to
             # a single non-streaming call (some local models emit tool calls as
-            # text in streaming mode).
-            try:
-                gen = None
-                async for ev in self._stream_turn(litellm, tools):
-                    if isinstance(ev, _Assembled):
-                        gen = ev
-                    else:
-                        yield ev
-            except _StreamUnsupported:
-                gen = None
-                async for ev in self._nonstream_turn(litellm, tools):
-                    if isinstance(ev, _Assembled):
-                        gen = ev
-                    else:
-                        yield ev
-            except Exception as exc:  # noqa: BLE001
-                yield Event("error", text=f"model call failed: {exc}")
-                return
+            # text in streaming mode). Transient provider errors (rate-limit/5xx/
+            # timeout) are retried with backoff before any output is produced.
+            gen = None
+            async for ev in self._dispatch_turn(litellm, tools):
+                if isinstance(ev, _Assembled):
+                    gen = ev
+                else:
+                    yield ev
 
-            if gen is None:  # an error event was already yielded
+            if gen is None:  # a terminal "error" event was already yielded
                 return
 
             self.messages.append(gen.assistant_msg)
@@ -210,13 +206,75 @@ class Agent:
                 # Run the (synchronous) tool off the event loop. This is what lets
                 # a confirm-callback safely block for a UI prompt (e.g. the TUI
                 # modal) without freezing the loop.
-                import asyncio
-
                 result = await asyncio.to_thread(self.toolbox.call, name, args)
                 yield Event("tool_end", tool=name, result=result)
                 self.messages.append({"role": "tool", "tool_call_id": call_id, "content": result})
 
         yield Event("error", text=f"stopped: hit max_steps ({self.config.max_steps})")
+
+    @staticmethod
+    def _transient_errors(litellm) -> tuple[type[BaseException], ...]:
+        """Provider errors worth retrying: rate-limit, 5xx, timeout, connection.
+
+        Deliberately excludes fatal errors (auth, bad request) — those should
+        fail fast rather than burn through the retry budget.
+        """
+        return (
+            litellm.RateLimitError,
+            litellm.APIConnectionError,
+            litellm.Timeout,
+            litellm.InternalServerError,
+            litellm.ServiceUnavailableError,
+        )
+
+    async def _dispatch_turn(self, litellm, tools):
+        """Run one model turn (streaming, falling back to non-streaming),
+        retrying transient provider errors with exponential backoff.
+
+        Yields Events, then a final _Assembled sentinel on success, or a
+        terminal "error" Event if the turn ultimately fails. A retry is only
+        attempted while no output has been produced yet for this attempt —
+        once content has streamed to the user, a blip is surfaced as-is
+        rather than silently redone.
+        """
+        transient = self._transient_errors(litellm)
+        attempt = 0
+        while True:
+            produced_output = False
+            try:
+                async for ev in self._stream_turn(litellm, tools):
+                    if not isinstance(ev, _Assembled):
+                        produced_output = True
+                    yield ev
+                return
+            except _StreamUnsupported:
+                try:
+                    async for ev in self._nonstream_turn(litellm, tools):
+                        if not isinstance(ev, _Assembled):
+                            produced_output = True
+                        yield ev
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    should_retry = (
+                        not produced_output
+                        and attempt < self.config.max_retries
+                        and isinstance(exc, transient)
+                    )
+                    if not should_retry:
+                        yield Event("error", text=f"model call failed: {exc}")
+                        return
+            except Exception as exc:  # noqa: BLE001
+                should_retry = (
+                    not produced_output
+                    and attempt < self.config.max_retries
+                    and isinstance(exc, transient)
+                )
+                if not should_retry:
+                    yield Event("error", text=f"model call failed: {exc}")
+                    return
+
+            await asyncio.sleep(min(2**attempt, _MAX_BACKOFF_SECONDS))
+            attempt += 1
 
     async def _stream_turn(self, litellm, tools):
         """Stream one model turn. Yields Events, then a final _Assembled sentinel.
@@ -235,16 +293,18 @@ class Agent:
         )
         content_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
-        # Guard: with include_usage some providers report usage on both the last
-        # content chunk and a final usage-only chunk — count it once per turn.
-        usage_counted = False
+        # Usage may arrive on its own final chunk (no choices) or attached to a
+        # content chunk — capture whichever arrives first, but don't record it
+        # until the stream fully completes. Recording it as soon as it's seen
+        # would double-count on a retry: if a transient error drops the
+        # connection after the usage chunk but before the stream finishes, the
+        # aborted attempt must not have already billed usage that the retried,
+        # successful attempt will bill again.
+        usage_chunk = None
 
         async for chunk in stream:
-            # Usage may arrive on its own final chunk (no choices) or attached to
-            # a content chunk — capture it either way, but only once.
-            if not usage_counted and getattr(chunk, "usage", None):
-                self.usage.add_response(chunk, litellm, model=self.config.model)
-                usage_counted = True
+            if usage_chunk is None and getattr(chunk, "usage", None):
+                usage_chunk = chunk
             choices = getattr(chunk, "choices", None)
             if not choices:
                 continue
@@ -264,6 +324,9 @@ class Agent:
                     slot["name"] = tc.function.name
                 if tc.function and tc.function.arguments:
                     slot["args"] += tc.function.arguments
+
+        if usage_chunk is not None:
+            self.usage.add_response(usage_chunk, litellm, model=self.config.model)
 
         calls = [
             {"id": c["id"] or f"call_{i}", "name": c["name"], "args": c["args"]}
