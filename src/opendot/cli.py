@@ -30,6 +30,7 @@ SLASH_HELP = """\
 [bold]Commands[/bold]
   /help     show this help
   /log      show the auditable history of actions taken
+  /diff     preview what /undo <id> would change, without touching disk
   /undo     revert the last action ( /undo <id> to restore to a point )
   /clear    reset the conversation
   /compact  trim old conversation turns to free up context
@@ -196,6 +197,9 @@ def _cmd_diff(workdir: str, snap_id: str) -> None:
     if target is None:
         console.print(f"[red]no action with id {snap_id}[/red]  (see: opendot log)")
         return
+    if not target.snapshot_before:
+        console.print(f"[yellow]action {snap_id} has no snapshot to diff[/yellow]")
+        return
 
     delta = rev.diff_to(target.snapshot_before)
     console.print(f"[bold]diff for {snap_id}[/bold] ({target.kind}: {target.detail[:50]})")
@@ -213,7 +217,8 @@ def _cmd_diff(workdir: str, snap_id: str) -> None:
         console.print(f"  [yellow]~[/yellow] {path}  (content differs)")
         diff_text = item.get("unified_diff")
         if diff_text:
-            console.print(diff_text, highlight=False)
+            # markup=False so diff content containing [..] isn't parsed as Rich markup.
+            console.print(diff_text, highlight=False, markup=False)
 
 
 def _note_lockfiles(console, changed: list[str]) -> None:
@@ -450,6 +455,13 @@ def _interactive(agent: Agent) -> None:
             continue
         if low == "/log":
             _cmd_log(agent.config.workdir)
+            continue
+        if low.startswith("/diff"):
+            parts = text.split(maxsplit=1)
+            if len(parts) > 1:
+                _cmd_diff(agent.config.workdir, parts[1].strip())
+            else:
+                console.print("[dim]usage: /diff <id>  (see /log for ids)[/dim]")
             continue
         if low.startswith("/undo"):
             parts = text.split(maxsplit=1)

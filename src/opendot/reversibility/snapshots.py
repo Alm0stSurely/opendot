@@ -584,6 +584,9 @@ def diff_snapshot(
         try:
             current_hash = _hash_file(current_files[rel])
         except OSError:
+            # Can't read the file to hash it, but restore would still overwrite it.
+            # Report it as modified (without a text diff) rather than hide it.
+            modified.append({"path": rel, "unified_diff": None})
             continue
         if current_hash != entry.h:
             diff_entry: dict = {"path": rel}
@@ -592,7 +595,11 @@ def diff_snapshot(
                     old_bytes = _read_object(entry.h)
                     new_bytes = current_files[rel].read_bytes()
                 except OSError:
-                    old_bytes, new_bytes = b"", b""
+                    # A read failed: report the change but skip the (now unreliable)
+                    # text diff rather than emit a misleading empty one.
+                    diff_entry["unified_diff"] = None
+                    modified.append(diff_entry)
+                    continue
                 if _is_text(old_bytes) and _is_text(new_bytes):
                     old_text = old_bytes.decode("utf-8")
                     new_text = new_bytes.decode("utf-8")
