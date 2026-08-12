@@ -1,10 +1,13 @@
 """Tests for the coding tools (grep, glob, edit) and that edit is undoable."""
 
+import os
+from pathlib import Path
+
 import pytest
 
 from opendot.reversibility.engine import Reversibility
 from opendot.reversibility.snapshots import IgnoreRules
-from opendot.tools.local import Toolbox
+from opendot.tools.local import Toolbox, _same_path
 
 
 @pytest.fixture(autouse=True)
@@ -266,7 +269,174 @@ def test_new_tools_are_in_specs(tmp_path):
         "write_file",
         "list_files",
         "web_fetch",
+        "move",
     } <= names
+
+
+def test_move_renames_file_and_reports_summary(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/b.py", "dst": "src/renamed.py"})
+    assert "src/b.py -> src/renamed.py" in out
+    assert not (wd / "src" / "b.py").exists()
+    assert (wd / "src" / "renamed.py").read_text() == "z = 3\n"
+
+
+def test_move_creates_parent_dirs_of_dst(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    tb.call("move", {"src": "src/b.py", "dst": "new_dir/nested/b.py"})
+    assert (wd / "new_dir" / "nested" / "b.py").read_text() == "z = 3\n"
+
+
+def test_move_is_undoable(tmp_path):
+    tb, wd, rev = _tb(tmp_path)
+    tb.call("move", {"src": "src/b.py", "dst": "src/renamed.py"})
+    assert (wd / "src" / "renamed.py").exists()
+
+    rev.undo_last()
+
+    assert not (wd / "src" / "renamed.py").exists()
+    assert (wd / "src" / "b.py").read_text() == "z = 3\n"
+
+
+def test_move_missing_src_is_clear_error(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/does_not_exist.py", "dst": "src/renamed.py"})
+    assert "error" in out
+    assert "not found" in out
+    assert not (wd / "src" / "renamed.py").exists()
+
+
+def test_move_existing_dst_is_clear_error_without_overwrite(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/b.py", "dst": "src/a.py"})
+    assert "error" in out
+    assert "already exists" in out
+    # nothing changed
+    assert (wd / "src" / "b.py").exists()
+    assert (wd / "src" / "a.py").read_text() == "x = 1  # TODO fix\ny = 2\n"
+
+
+def test_move_existing_dst_with_overwrite_replaces_it(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/b.py", "dst": "src/a.py", "overwrite": True})
+    assert "src/b.py -> src/a.py" in out
+    assert not (wd / "src" / "b.py").exists()
+    assert (wd / "src" / "a.py").read_text() == "z = 3\n"
+
+
+def test_move_overwrite_rejects_directory_destination(tmp_path):
+    """overwrite=true must not silently move src INTO an existing directory dst
+    (shutil.move's default behavior) — that contradicts the documented
+    'replace it' semantics of overwrite."""
+    tb, wd, _ = _tb(tmp_path)
+    (wd / "otherdir").mkdir()
+
+    out = tb.call("move", {"src": "src/b.py", "dst": "otherdir", "overwrite": True})
+
+    assert "error" in out
+    assert "directory" in out
+    assert (wd / "src" / "b.py").exists()  # unmoved
+    assert not (wd / "otherdir" / "b.py").exists()  # not moved into the dir either
+
+
+def test_move_same_src_and_dst_with_overwrite_is_a_no_op(tmp_path):
+    """A no-op move (src == dst) with overwrite=true must not delete the
+    source: unlinking dst before the move would otherwise wipe it out since
+    src and dst are the same file."""
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/b.py", "dst": "src/b.py", "overwrite": True})
+    assert "error" not in out
+    assert (wd / "src" / "b.py").read_text() == "z = 3\n"
+
+
+def test_move_symlink_aliasing_is_not_treated_as_same_path(tmp_path):
+    """Two distinct symlinks that happen to resolve to the same target must not
+    be treated as a same-path no-op — Path.resolve() dereferences symlinks,
+    which would wrongly conflate two different paths as identical."""
+    tb, wd, _ = _tb(tmp_path)
+    target = wd / "src" / "b.py"
+    link_a = wd / "link_a.py"
+    link_b = wd / "link_b.py"
+    link_a.symlink_to(target)
+    link_b.symlink_to(target)
+
+    out = tb.call("move", {"src": "link_a.py", "dst": "link_b.py"})
+
+    assert "no change" not in out
+    assert "already exists" in out
+
+
+def test_same_path_distinguishes_different_paths():
+    assert _same_path(Path("/ws/src/a.py"), Path("/ws/src/b.py")) is False
+
+
+def test_same_path_is_case_insensitive_via_normcase(monkeypatch):
+    """The same-path comparison must fold case via os.path.normcase, so paths
+    differing only by case are recognized as aliases on case-insensitive
+    filesystems (Windows, default macOS). normcase is a no-op on this
+    (case-sensitive) test host, so monkeypatch it to simulate that platform's
+    behavior — this keeps the test deterministic and portable."""
+    monkeypatch.setattr(os.path, "normcase", str.lower)
+    assert _same_path(Path("/ws/src/B.py"), Path("/ws/src/b.py")) is True
+
+
+def test_move_symlink_reports_its_own_path_not_target(tmp_path):
+    """The returned 'src -> dst' summary (and the confirm/ledger text) must
+    show the symlink's own path, not the path it resolves to — self._rel()
+    dereferences symlinks, which would misreport a symlink move as if the
+    real target file moved."""
+    tb, wd, _ = _tb(tmp_path)
+    link = wd / "link.py"
+    link.symlink_to(wd / "src" / "b.py")
+
+    out = tb.call("move", {"src": "link.py", "dst": "renamed_link.py"})
+
+    assert "link.py -> renamed_link.py" in out
+    assert "src/b.py" not in out
+
+
+def test_move_dst_parent_is_a_file_returns_clean_error(tmp_path):
+    """If dst's parent path component is actually an existing file (not a
+    directory), mkdir(parents=True) raises — this must surface as the same
+    kind of clean error string the rest of move() returns, matching how
+    write_file/edit wrap their mkdir+mutate in one try/except."""
+    tb, wd, _ = _tb(tmp_path)
+    blocker = wd / "blocker.txt"
+    blocker.write_text("im a file, not a dir\n")
+
+    out = tb.call("move", {"src": "src/b.py", "dst": "blocker.txt/nested/b.py"})
+
+    assert out.startswith("error moving")
+    assert (wd / "src" / "b.py").exists()  # unmoved
+
+
+def test_move_outside_workspace_is_irreversible_and_confirmed(tmp_path):
+    """A move whose destination escapes the workspace isn't covered by the
+    snapshot, so it must be confirmed first and recorded as NOT reversible."""
+    tb, wd, rev = _tb(tmp_path)
+    outside = tmp_path / "outside.py"
+
+    out = tb.call("move", {"src": "src/b.py", "dst": str(outside)})
+    assert "src/b.py ->" in out
+    assert outside.read_text() == "z = 3\n"
+
+    last = rev.history()[-1]
+    assert last.reversible is False
+    assert "not undoable" in last.note
+
+
+def test_declining_outside_move_skips_it(tmp_path):
+    wd = tmp_path / "ws"
+    (wd / "src").mkdir(parents=True)
+    (wd / "src" / "b.py").write_text("z = 3\n")
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: False)  # decline
+
+    outside = tmp_path / "outside.py"
+    out = tb.call("move", {"src": "src/b.py", "dst": str(outside)})
+    assert out.startswith("skipped")
+    assert not outside.exists()
+    assert (wd / "src" / "b.py").exists()  # unchanged
 
 
 def test_web_fetch_returns_markdown(tmp_path, monkeypatch):

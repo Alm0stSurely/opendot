@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import difflib
 import os
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,6 +65,20 @@ def _unified_diff(old: str, new: str, path: str, max_lines: int = 200) -> str:
     if len(diff) > max_lines:
         diff = diff[:max_lines] + [f"... (+{len(diff) - max_lines} more diff lines)"]
     return "\n".join(diff)
+
+
+def _same_path(a: Path, b: Path) -> bool:
+    """True if `a` and `b` denote the same filesystem path, compared lexically
+    (normpath + normcase) — NOT via Path.resolve(), which would dereference
+    symlinks and wrongly conflate two distinct paths pointing at the same
+    target. normcase folds case on case-insensitive filesystems (Windows,
+    default macOS) and is a no-op elsewhere.
+    """
+
+    def _norm(p: Path) -> str:
+        return os.path.normcase(os.path.normpath(str(p)))
+
+    return _norm(a) == _norm(b)
 
 
 def _truncate(text: str) -> str:
@@ -160,6 +175,17 @@ class Toolbox:
             return str(p.resolve().relative_to(self.workdir))
         except ValueError:
             return str(p)
+
+    def _rel_no_resolve(self, p: Path) -> str:
+        """Like _rel, but purely lexical (normpath, no Path.resolve()). Used
+        where the path itself — e.g. a symlink — is what the user asked to
+        act on, not whatever it points at; resolving would misreport it."""
+        norm = Path(os.path.normpath(str(p)))
+        wd = Path(os.path.normpath(str(self.workdir)))
+        try:
+            return str(norm.relative_to(wd))
+        except ValueError:
+            return str(norm)
 
     def _is_outside_workspace(self, p: Path) -> bool:
         """True if ``p`` is not under the working directory. Writes/edits to such
@@ -483,6 +509,66 @@ class Toolbox:
             rel = self._rel(p)
             return f"edited {rel} ({replaced} replacement(s))\n" + _unified_diff(text, new, rel)
 
+        def move(src: str, dst: str, overwrite: bool = False) -> str:
+            """Move/rename a file or directory (surgical, undoable).
+
+            Errors on a missing src or an existing dst unless overwrite=True —
+            mirrors the confirm-first-then-record pattern edit/write_file use for
+            paths outside the workspace.
+            """
+            p_src = self._resolve(src)
+            p_dst = self._resolve(dst)
+            if not p_src.exists():
+                return f"error: file not found: {p_src}"
+            if _same_path(p_src, p_dst):
+                # Same path either way — nothing to do, and critically must NOT
+                # fall into the overwrite=True unlink-then-move path below, which
+                # would delete src (since dst IS src) before the move can run.
+                return f"no change: {src} and {dst} are the same path\n"
+            if p_dst.exists():
+                if not overwrite:
+                    return (
+                        f"error: destination already exists: {p_dst} "
+                        "(pass overwrite=true to replace it)"
+                    )
+                if p_dst.is_dir():
+                    # shutil.move()'s default behavior for a directory dst is to
+                    # move src INTO it, not replace it — that contradicts what
+                    # overwrite=true promises, so reject it explicitly.
+                    return f"error: cannot overwrite a directory: {p_dst}"
+            # A move touching a path outside the working dir isn't covered by the
+            # snapshot on that side, so it can't be fully undone. Confirm first and
+            # record it honestly as irreversible, exactly like an escaping write/edit.
+            outside = self._is_outside_workspace(p_src) or self._is_outside_workspace(p_dst)
+            # _rel_no_resolve, not _rel: a symlink's own path is what was asked
+            # to move, not whatever it points at — resolving would misreport
+            # the confirm prompt, ledger entry, and return value alike.
+            rel_src, rel_dst = self._rel_no_resolve(p_src), self._rel_no_resolve(p_dst)
+            if outside and not self._confirm(
+                f"This moves a file outside the workspace and can't be undone:\n"
+                f"  {rel_src} -> {rel_dst}\nMove it?"
+            ):
+                return "skipped: user declined a move outside the workspace"
+            if self.rev is not None:
+                self.rev.before_action(
+                    "write",
+                    f"{rel_src} -> {rel_dst}",
+                    reversible=not outside,
+                    note="outside the workspace — not undoable" if outside else "",
+                )
+            try:
+                p_dst.parent.mkdir(parents=True, exist_ok=True)
+                # Remove an existing dst explicitly rather than relying on
+                # os.rename's implicit overwrite (shutil.move's fallback) — that
+                # isn't reliable across platforms (os.rename raises on Windows if
+                # dst exists).
+                if overwrite and p_dst.exists():
+                    p_dst.unlink()
+                shutil.move(str(p_src), str(p_dst))
+            except Exception as exc:  # noqa: BLE001
+                return f"error moving {p_src} to {p_dst}: {exc}"
+            return f"{rel_src} -> {rel_dst}"
+
         def web_fetch(url: str) -> str:
             """Fetch an http(s) URL and return its content as LLM-ready markdown
             (structured text, headings, links, tables) via PyScrappy. Read-only:
@@ -625,6 +711,24 @@ class Toolbox:
                     "required": ["path", "find", "replace"],
                 },
                 edit,
+            ),
+            Tool(
+                "move",
+                "Move or rename a file or directory (surgical, undoable). Errors if "
+                "dst already exists unless overwrite=true.",
+                {
+                    "type": "object",
+                    "properties": {
+                        "src": {"type": "string"},
+                        "dst": {"type": "string"},
+                        "overwrite": {
+                            "type": "boolean",
+                            "description": "Replace dst if it already exists (default false).",
+                        },
+                    },
+                    "required": ["src", "dst"],
+                },
+                move,
             ),
             Tool(
                 "web_fetch",
