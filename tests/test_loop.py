@@ -149,7 +149,7 @@ def test_stream_turn_choiceless_chunk_not_fatal():
     assert not any(isinstance(ev, Event) and ev.type == "error" for ev in events)
 
 
-def _run_agent(a, litellm, monkeypatch, user_message="hi"):
+def _run_agent(a, litellm, monkeypatch, user_message="hi", sleep_log=None):
     import sys
 
     from opendot.agent import loop as loop_module
@@ -159,7 +159,13 @@ def _run_agent(a, litellm, monkeypatch, user_message="hi"):
     # single shared module object, so capture the real sleep before patching
     # it — otherwise the replacement would call itself recursively.
     real_sleep = loop_module.asyncio.sleep
-    monkeypatch.setattr(loop_module.asyncio, "sleep", lambda *a, **k: real_sleep(0))
+
+    async def fake_sleep(seconds, *a, **k):
+        if sleep_log is not None:
+            sleep_log.append(seconds)
+        await real_sleep(0)
+
+    monkeypatch.setattr(loop_module.asyncio, "sleep", fake_sleep)
 
     async def go():
         events = []
@@ -221,3 +227,70 @@ def test_run_zero_max_retries_fails_on_first_transient_error(monkeypatch):
     assert fake.calls == 1
     assert len(events) == 1
     assert events[0].type == "error"
+
+
+class _DropsAfterUsageChunk(types.SimpleNamespace):
+    """Fake litellm: first call's stream yields a usage-only chunk then drops
+    with a transient error; second call succeeds. Models a provider that
+    reports usage before the connection is lost mid-turn.
+    """
+
+    RateLimitError = real_litellm.RateLimitError
+    APIConnectionError = real_litellm.APIConnectionError
+    Timeout = real_litellm.Timeout
+    InternalServerError = real_litellm.InternalServerError
+    ServiceUnavailableError = real_litellm.ServiceUnavailableError
+    AuthenticationError = real_litellm.AuthenticationError
+    BadRequestError = real_litellm.BadRequestError
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.calls = 0
+
+    async def acompletion(self, **kw):
+        self.calls += 1
+        if self.calls == 1:
+
+            async def gen_fail():
+                yield _chunk_no_choices(with_usage=True)
+                raise real_litellm.Timeout(message="dropped", model="gpt-4o", llm_provider="openai")
+
+            return gen_fail()
+
+        async def gen_ok():
+            yield _chunk_with_choices("done", with_usage=True)
+
+        return gen_ok()
+
+
+def test_retry_does_not_double_count_usage(monkeypatch):
+    """A transient error after usage arrives but before the stream finishes
+    must not record that usage — the retried, successful attempt records it
+    once, not the aborted attempt too."""
+    a = _bare_agent(max_retries=1)
+    usage_calls = []
+    a.usage.add_response = lambda *a2, **k: usage_calls.append(1)
+    fake = _DropsAfterUsageChunk()
+
+    events = _run_agent(a, fake, monkeypatch)
+
+    assert fake.calls == 2
+    assert not any(ev.type == "error" for ev in events)
+    assert usage_calls == [1]
+
+
+def test_backoff_delay_is_capped(monkeypatch):
+    """Exponential backoff must not grow unbounded as retries increase."""
+    from opendot.agent import loop as loop_module
+
+    a = _bare_agent(max_retries=10)
+    fake = _FlakyLiteLLM(fail_times=99, make_exc=_rate_limit_error)
+    sleep_log: list[float] = []
+
+    _run_agent(a, fake, monkeypatch, sleep_log=sleep_log)
+
+    assert fake.calls == 11  # 1 initial attempt + 10 retries
+    assert len(sleep_log) == 10
+    assert max(sleep_log) <= loop_module._MAX_BACKOFF_SECONDS
+    # Naive 2**attempt would reach 512s by the 10th retry; confirm it's capped.
+    assert 512 not in sleep_log

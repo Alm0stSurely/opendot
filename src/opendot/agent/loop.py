@@ -48,6 +48,11 @@ class _StreamUnsupported(Exception):
     """Raised when a provider's stream can't yield structured tool calls."""
 
 
+# Cap on the exponential-backoff sleep between retries so a high max_retries
+# can't turn into multi-minute waits before a turn finally gives up.
+_MAX_BACKOFF_SECONDS = 30
+
+
 @dataclass
 class _Assembled:
     """Sentinel yielded at the end of a turn carrying the assembled result."""
@@ -268,7 +273,7 @@ class Agent:
                     yield Event("error", text=f"model call failed: {exc}")
                     return
 
-            await asyncio.sleep(2**attempt)
+            await asyncio.sleep(min(2**attempt, _MAX_BACKOFF_SECONDS))
             attempt += 1
 
     async def _stream_turn(self, litellm, tools):
@@ -288,16 +293,18 @@ class Agent:
         )
         content_parts: list[str] = []
         tool_calls: dict[int, dict[str, Any]] = {}
-        # Guard: with include_usage some providers report usage on both the last
-        # content chunk and a final usage-only chunk — count it once per turn.
-        usage_counted = False
+        # Usage may arrive on its own final chunk (no choices) or attached to a
+        # content chunk — capture whichever arrives first, but don't record it
+        # until the stream fully completes. Recording it as soon as it's seen
+        # would double-count on a retry: if a transient error drops the
+        # connection after the usage chunk but before the stream finishes, the
+        # aborted attempt must not have already billed usage that the retried,
+        # successful attempt will bill again.
+        usage_chunk = None
 
         async for chunk in stream:
-            # Usage may arrive on its own final chunk (no choices) or attached to
-            # a content chunk — capture it either way, but only once.
-            if not usage_counted and getattr(chunk, "usage", None):
-                self.usage.add_response(chunk, litellm, model=self.config.model)
-                usage_counted = True
+            if usage_chunk is None and getattr(chunk, "usage", None):
+                usage_chunk = chunk
             choices = getattr(chunk, "choices", None)
             if not choices:
                 continue
@@ -317,6 +324,9 @@ class Agent:
                     slot["name"] = tc.function.name
                 if tc.function and tc.function.arguments:
                     slot["args"] += tc.function.arguments
+
+        if usage_chunk is not None:
+            self.usage.add_response(usage_chunk, litellm, model=self.config.model)
 
         calls = [
             {"id": c["id"] or f"call_{i}", "name": c["name"], "args": c["args"]}
