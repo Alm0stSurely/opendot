@@ -1,10 +1,13 @@
 """Tests for the coding tools (grep, glob, edit) and that edit is undoable."""
 
+import os
+from pathlib import Path
+
 import pytest
 
 from opendot.reversibility.engine import Reversibility
 from opendot.reversibility.snapshots import IgnoreRules
-from opendot.tools.local import Toolbox
+from opendot.tools.local import Toolbox, _same_path
 
 
 @pytest.fixture(autouse=True)
@@ -361,6 +364,35 @@ def test_move_symlink_aliasing_is_not_treated_as_same_path(tmp_path):
 
     assert "no change" not in out
     assert "already exists" in out
+
+
+def test_same_path_distinguishes_different_paths():
+    assert _same_path(Path("/ws/src/a.py"), Path("/ws/src/b.py")) is False
+
+
+def test_same_path_is_case_insensitive_via_normcase(monkeypatch):
+    """The same-path comparison must fold case via os.path.normcase, so paths
+    differing only by case are recognized as aliases on case-insensitive
+    filesystems (Windows, default macOS). normcase is a no-op on this
+    (case-sensitive) test host, so monkeypatch it to simulate that platform's
+    behavior — this keeps the test deterministic and portable."""
+    monkeypatch.setattr(os.path, "normcase", str.lower)
+    assert _same_path(Path("/ws/src/B.py"), Path("/ws/src/b.py")) is True
+
+
+def test_move_symlink_reports_its_own_path_not_target(tmp_path):
+    """The returned 'src -> dst' summary (and the confirm/ledger text) must
+    show the symlink's own path, not the path it resolves to — self._rel()
+    dereferences symlinks, which would misreport a symlink move as if the
+    real target file moved."""
+    tb, wd, _ = _tb(tmp_path)
+    link = wd / "link.py"
+    link.symlink_to(wd / "src" / "b.py")
+
+    out = tb.call("move", {"src": "link.py", "dst": "renamed_link.py"})
+
+    assert "link.py -> renamed_link.py" in out
+    assert "src/b.py" not in out
 
 
 def test_move_dst_parent_is_a_file_returns_clean_error(tmp_path):

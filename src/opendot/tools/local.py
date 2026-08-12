@@ -67,6 +67,20 @@ def _unified_diff(old: str, new: str, path: str, max_lines: int = 200) -> str:
     return "\n".join(diff)
 
 
+def _same_path(a: Path, b: Path) -> bool:
+    """True if `a` and `b` denote the same filesystem path, compared lexically
+    (normpath + normcase) — NOT via Path.resolve(), which would dereference
+    symlinks and wrongly conflate two distinct paths pointing at the same
+    target. normcase folds case on case-insensitive filesystems (Windows,
+    default macOS) and is a no-op elsewhere.
+    """
+
+    def _norm(p: Path) -> str:
+        return os.path.normcase(os.path.normpath(str(p)))
+
+    return _norm(a) == _norm(b)
+
+
 def _truncate(text: str) -> str:
     max_output = _max_output()
     if len(text) > max_output:
@@ -161,6 +175,17 @@ class Toolbox:
             return str(p.resolve().relative_to(self.workdir))
         except ValueError:
             return str(p)
+
+    def _rel_no_resolve(self, p: Path) -> str:
+        """Like _rel, but purely lexical (normpath, no Path.resolve()). Used
+        where the path itself — e.g. a symlink — is what the user asked to
+        act on, not whatever it points at; resolving would misreport it."""
+        norm = Path(os.path.normpath(str(p)))
+        wd = Path(os.path.normpath(str(self.workdir)))
+        try:
+            return str(norm.relative_to(wd))
+        except ValueError:
+            return str(norm)
 
     def _is_outside_workspace(self, p: Path) -> bool:
         """True if ``p`` is not under the working directory. Writes/edits to such
@@ -495,10 +520,7 @@ class Toolbox:
             p_dst = self._resolve(dst)
             if not p_src.exists():
                 return f"error: file not found: {p_src}"
-            # Lexical comparison only (os.path.normpath), NOT Path.resolve() —
-            # resolve() dereferences symlinks, which would wrongly treat two
-            # distinct symlinks pointing at the same target as "the same path".
-            if os.path.normpath(str(p_src)) == os.path.normpath(str(p_dst)):
+            if _same_path(p_src, p_dst):
                 # Same path either way — nothing to do, and critically must NOT
                 # fall into the overwrite=True unlink-then-move path below, which
                 # would delete src (since dst IS src) before the move can run.
@@ -518,7 +540,10 @@ class Toolbox:
             # snapshot on that side, so it can't be fully undone. Confirm first and
             # record it honestly as irreversible, exactly like an escaping write/edit.
             outside = self._is_outside_workspace(p_src) or self._is_outside_workspace(p_dst)
-            rel_src, rel_dst = self._rel(p_src), self._rel(p_dst)
+            # _rel_no_resolve, not _rel: a symlink's own path is what was asked
+            # to move, not whatever it points at — resolving would misreport
+            # the confirm prompt, ledger entry, and return value alike.
+            rel_src, rel_dst = self._rel_no_resolve(p_src), self._rel_no_resolve(p_dst)
             if outside and not self._confirm(
                 f"This moves a file outside the workspace and can't be undone:\n"
                 f"  {rel_src} -> {rel_dst}\nMove it?"
