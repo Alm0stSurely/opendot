@@ -495,6 +495,11 @@ class Toolbox:
             p_dst = self._resolve(dst)
             if not p_src.exists():
                 return f"error: file not found: {p_src}"
+            if p_src.resolve() == p_dst.resolve():
+                # Same path either way — nothing to do, and critically must NOT
+                # fall into the overwrite=True unlink-then-move path below, which
+                # would delete src (since dst IS src) before the move can run.
+                return f"no change: {src} and {dst} are the same path\n"
             if p_dst.exists():
                 if not overwrite:
                     return (
@@ -523,16 +528,14 @@ class Toolbox:
                     reversible=not outside,
                     note="outside the workspace — not undoable" if outside else "",
                 )
-            p_dst.parent.mkdir(parents=True, exist_ok=True)
-            # Remove an existing dst explicitly rather than relying on os.rename's
-            # implicit overwrite (shutil.move's fallback) — that isn't reliable
-            # across platforms (e.g. os.rename raises on Windows if dst exists).
-            if overwrite and p_dst.exists():
-                try:
-                    p_dst.unlink()
-                except OSError as exc:
-                    return f"error removing existing destination {p_dst}: {exc}"
             try:
+                p_dst.parent.mkdir(parents=True, exist_ok=True)
+                # Remove an existing dst explicitly rather than relying on
+                # os.rename's implicit overwrite (shutil.move's fallback) — that
+                # isn't reliable across platforms (os.rename raises on Windows if
+                # dst exists).
+                if overwrite and p_dst.exists():
+                    p_dst.unlink()
                 shutil.move(str(p_src), str(p_dst))
             except Exception as exc:  # noqa: BLE001
                 return f"error moving {p_src} to {p_dst}: {exc}"

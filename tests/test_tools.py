@@ -336,6 +336,31 @@ def test_move_overwrite_rejects_directory_destination(tmp_path):
     assert not (wd / "otherdir" / "b.py").exists()  # not moved into the dir either
 
 
+def test_move_same_src_and_dst_with_overwrite_is_a_no_op(tmp_path):
+    """A no-op move (src == dst) with overwrite=true must not delete the
+    source: unlinking dst before the move would otherwise wipe it out since
+    src and dst are the same file."""
+    tb, wd, _ = _tb(tmp_path)
+    out = tb.call("move", {"src": "src/b.py", "dst": "src/b.py", "overwrite": True})
+    assert "error" not in out
+    assert (wd / "src" / "b.py").read_text() == "z = 3\n"
+
+
+def test_move_dst_parent_is_a_file_returns_clean_error(tmp_path):
+    """If dst's parent path component is actually an existing file (not a
+    directory), mkdir(parents=True) raises — this must surface as the same
+    kind of clean error string the rest of move() returns, matching how
+    write_file/edit wrap their mkdir+mutate in one try/except."""
+    tb, wd, _ = _tb(tmp_path)
+    blocker = wd / "blocker.txt"
+    blocker.write_text("im a file, not a dir\n")
+
+    out = tb.call("move", {"src": "src/b.py", "dst": "blocker.txt/nested/b.py"})
+
+    assert out.startswith("error moving")
+    assert (wd / "src" / "b.py").exists()  # unmoved
+
+
 def test_move_outside_workspace_is_irreversible_and_confirmed(tmp_path):
     """A move whose destination escapes the workspace isn't covered by the
     snapshot, so it must be confirmed first and recorded as NOT reversible."""
