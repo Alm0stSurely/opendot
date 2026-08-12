@@ -113,6 +113,61 @@ def test_read_and_edit_xlsx(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("7", 7),
+        ("-5", -5),
+        ("+7", 7),
+        ("0", 0),
+        ("3.14", 3.14),
+        ("1e3", 1000.0),
+        (".5", 0.5),
+        # These must stay TEXT (the bug this fixes):
+        ("007", "007"),  # leading-zero ID/ZIP/SKU
+        ("1_000", "1_000"),  # underscore separators
+        ("inf", "inf"),  # non-finite
+        ("nan", "nan"),
+        ("-inf", "-inf"),
+        ("١٢٣", "١٢٣"),  # unicode digits
+        ("2,000", "2,000"),  # thousands separator
+        ("abc", "abc"),
+        ("007-88-1234", "007-88-1234"),
+        ("=A1+A2", "=A1+A2"),  # formula passes through
+    ],
+)
+def test_coerce_cell_value(value, expected):
+    from opendot.tools.office import _coerce_cell_value
+
+    result = _coerce_cell_value(value)
+    assert result == expected
+    assert type(result) is type(expected)  # int vs float vs str must match
+
+
+def test_edit_cell_preserves_leading_zeros_by_default(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    tb.call("edit_cell", {"path": "data.xlsx", "cell": "A2", "value": "007"})
+
+    import openpyxl
+
+    # "007" is not a canonical number, so it stays the string "007", not 7.
+    assert openpyxl.load_workbook(wd / "data.xlsx").active["A2"].value == "007"
+
+
+def test_edit_cell_text_flag_forces_string(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    # text=True keeps even a plain number as a string.
+    tb.call("edit_cell", {"path": "data.xlsx", "cell": "B2", "value": "120", "text": True})
+
+    import openpyxl
+
+    cell = openpyxl.load_workbook(wd / "data.xlsx").active["B2"]
+    assert cell.value == "120"
+    assert isinstance(cell.value, str)
+
+
+@pytest.mark.parametrize(
     ("tool_name", "arguments"),
     [
         ("read_xlsx", {}),

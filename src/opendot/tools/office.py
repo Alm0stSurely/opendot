@@ -13,8 +13,40 @@ aren't installed, the tools aren't registered (see build_office_tools).
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
+
+# A canonical, plain numeric literal: optional sign, ASCII digits, optional single
+# decimal part and/or exponent. Deliberately strict — it rejects underscores
+# ("1_000"), non-finite words ("inf"/"nan"), unicode digits, and thousands
+# separators, all of which Python's int()/float() would otherwise accept. A
+# leading-zero integer ("007") is handled separately so ZIP/ID/SKU values survive.
+_INT_RE = re.compile(r"[+-]?[0-9]+")
+_FLOAT_RE = re.compile(r"[+-]?(?:[0-9]+\.[0-9]*|\.[0-9]+|[0-9]+)(?:[eE][+-]?[0-9]+)?")
+
+
+def _coerce_cell_value(value: str) -> Any:
+    """Convert a cell string to int/float only when it's an unambiguous, canonical
+    number; otherwise keep it as text. Formulas (leading '=') pass through as-is.
+
+    Kept conservative on purpose: leading-zero integers, underscores, inf/nan, and
+    non-ASCII digits all stay text, so IDs like "007" or codes aren't mangled.
+    """
+    if value.startswith("="):
+        return value  # formula
+
+    if _INT_RE.fullmatch(value):
+        # Preserve leading zeros (ZIP/ID/SKU): "007" stays text, "0" is fine.
+        digits = value.lstrip("+-")
+        if len(digits) > 1 and digits[0] == "0":
+            return value
+        return int(value)
+
+    if _FLOAT_RE.fullmatch(value):
+        return float(value)  # regex already excludes inf/nan/underscores
+
+    return value
 
 
 def office_available() -> bool:
@@ -79,7 +111,9 @@ def build_office_tools(box) -> list:
             lines.append(f"{r}: {cells}")
         return _truncate("\n".join(lines))
 
-    def edit_cell(path: str, cell: str, value: str, sheet: str | None = None) -> str:
+    def edit_cell(
+        path: str, cell: str, value: str, sheet: str | None = None, text: bool = False
+    ) -> str:
         import openpyxl
 
         p = box._resolve(path)
@@ -93,16 +127,7 @@ def build_office_tools(box) -> list:
         old = ws[cell].value
         if not _snapshot(p):
             return "skipped: user declined an edit outside the workspace"
-        # numbers stay numbers; formulas (leading '=') pass through
-        v: Any = value
-        if not value.startswith("="):
-            try:
-                v = int(value)
-            except ValueError:
-                try:
-                    v = float(value)
-                except ValueError:
-                    v = value
+        v = value if text else _coerce_cell_value(value)
         ws[cell] = v
         wb.save(p)
         return f"{box._rel(p)} [{ws.title}] {cell}: {old!r} → {v!r}"
@@ -191,7 +216,8 @@ def build_office_tools(box) -> list:
         ),
         Tool(
             "edit_cell",
-            "Set one cell in an .xlsx (e.g. cell 'B4'). Numbers/formulas handled. Undoable.",
+            "Set one cell in an .xlsx (e.g. cell 'B4'). Canonical numbers and "
+            "formulas ('=...') are handled; pass text=true to force a string. Undoable.",
             {
                 "type": "object",
                 "properties": {
@@ -202,6 +228,14 @@ def build_office_tools(box) -> list:
                     },
                     "value": {"type": "string"},
                     "sheet": {"type": "string"},
+                    "text": {
+                        "type": "boolean",
+                        "description": (
+                            "Write the value as text without numeric coercion "
+                            "(e.g. keep '007' or a phone number as a string). "
+                            "Default false."
+                        ),
+                    },
                 },
                 "required": ["path", "cell", "value"],
             },
