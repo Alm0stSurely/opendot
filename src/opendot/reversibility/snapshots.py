@@ -17,6 +17,7 @@ dirs; callers may override in both directions (see ``IgnoreRules``).
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -529,3 +530,83 @@ def restore_snapshot(snap: Snapshot, rules: IgnoreRules | None = None) -> list[s
 
     # De-dupe (a lockfile could be both changed and matched) and return.
     return sorted(set(changed_lockfiles))
+
+
+def _is_text(data: bytes) -> bool:
+    """Best-effort text detection for diff purposes."""
+    if b"\x00" in data:
+        return False
+    try:
+        data.decode("utf-8")
+        return True
+    except UnicodeDecodeError:
+        return False
+
+
+def diff_snapshot(
+    snap: Snapshot,
+    rules: IgnoreRules | None = None,
+    *,
+    include_text_diff: bool = True,
+) -> dict:
+    """Compare a snapshot against the current workspace.
+
+    Returns a dry-run delta describing what ``restore_snapshot(snap)`` would do:
+
+    - ``added`` — files in the snapshot but missing now (a restore would recreate them)
+    - ``removed`` — files present now but not in the snapshot (a restore would delete them)
+    - ``modified`` — files whose content differs. Each entry is a dict with
+      ``path`` and, for text files when ``include_text_diff`` is True, a
+      ``unified_diff`` string.
+
+    Ignored paths are excluded from the live walk, matching the restore behavior.
+    """
+    rules = rules or IgnoreRules()
+    wd = Path(snap.workdir).resolve()
+
+    current_files: dict[str, Path] = {}
+    for f in _iter_files(wd, rules):
+        rel = f.relative_to(wd).as_posix()
+        rel_path = Path(rel)
+        if rel_path.is_absolute() or ".." in rel_path.parts:
+            continue
+        current_files[rel] = f
+
+    snap_files = set(snap.files)
+    current_paths = set(current_files)
+
+    added = sorted(snap_files - current_paths)
+    removed = sorted(current_paths - snap_files)
+    modified: list[dict] = []
+
+    for rel in sorted(snap_files & current_paths):
+        entry = snap.files[rel]
+        try:
+            current_hash = _hash_file(current_files[rel])
+        except OSError:
+            continue
+        if current_hash != entry.h:
+            diff_entry: dict = {"path": rel}
+            if include_text_diff:
+                try:
+                    old_bytes = _read_object(entry.h)
+                    new_bytes = current_files[rel].read_bytes()
+                except OSError:
+                    old_bytes, new_bytes = b"", b""
+                if _is_text(old_bytes) and _is_text(new_bytes):
+                    old_text = old_bytes.decode("utf-8")
+                    new_text = new_bytes.decode("utf-8")
+                    diff_lines = list(
+                        difflib.unified_diff(
+                            old_text.splitlines(keepends=True),
+                            new_text.splitlines(keepends=True),
+                            fromfile=f"snapshot/{rel}",
+                            tofile=f"workspace/{rel}",
+                        )
+                    )
+                    diff_entry["unified_diff"] = "".join(diff_lines)
+                else:
+                    diff_entry["unified_diff"] = None
+            modified.append(diff_entry)
+
+    return {"added": added, "removed": removed, "modified": modified}

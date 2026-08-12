@@ -659,3 +659,90 @@ def test_unicode_and_spaces_in_filenames(tmp_path):
     S.restore_snapshot(snap)
     for n in names:
         assert (wd / n).read_text() == f"content of {n}"
+
+
+def test_diff_snapshot_reports_added_removed_modified(tmp_path):
+    """diff_snapshot compares the manifest against the live workspace without changing it."""
+    wd = _workspace(tmp_path)
+    (wd / "keep.txt").write_text("unchanged")
+    (wd / "change.txt").write_text("original")
+    (wd / "gone.txt").write_text("will be deleted")
+    snap = S.take_snapshot(wd)
+
+    # simulate changes that restore_snapshot would revert
+    (wd / "change.txt").write_text("modified")
+    (wd / "gone.txt").unlink()
+    (wd / "new.txt").write_text("created after snapshot")
+
+    delta = S.diff_snapshot(snap)
+    assert delta["added"] == ["gone.txt"]
+    assert delta["removed"] == ["new.txt"]
+    assert len(delta["modified"]) == 1
+    assert delta["modified"][0]["path"] == "change.txt"
+    assert "-original" in delta["modified"][0]["unified_diff"]
+    assert "+modified" in delta["modified"][0]["unified_diff"]
+    # workspace is untouched
+    assert (wd / "new.txt").exists()
+    assert not (wd / "gone.txt").exists()
+
+
+def test_diff_snapshot_no_changes(tmp_path):
+    wd = _workspace(tmp_path)
+    (wd / "a.txt").write_text("same")
+    snap = S.take_snapshot(wd)
+    delta = S.diff_snapshot(snap)
+    assert delta == {"added": [], "removed": [], "modified": []}
+
+
+def test_diff_snapshot_ignores_skipped_paths(tmp_path):
+    """Ignored directories (e.g. .git) are excluded from the live comparison."""
+    wd = _workspace(tmp_path)
+    (wd / "real.txt").write_text("v1")
+    snap = S.take_snapshot(wd)
+
+    (wd / ".git").mkdir()
+    (wd / ".git" / "HEAD").write_text("precious")
+
+    delta = S.diff_snapshot(snap)
+    assert delta == {"added": [], "removed": [], "modified": []}
+
+
+def test_diff_snapshot_binary_files_no_text_diff(tmp_path):
+    """Binary files are reported as modified but do not carry a unified diff."""
+    wd = _workspace(tmp_path)
+    data = bytes(range(256)) * 4
+    (wd / "blob.bin").write_bytes(data)
+    snap = S.take_snapshot(wd)
+
+    (wd / "blob.bin").write_bytes(b"\x00" * len(data))
+
+    delta = S.diff_snapshot(snap)
+    assert len(delta["modified"]) == 1
+    assert delta["modified"][0]["path"] == "blob.bin"
+    assert delta["modified"][0]["unified_diff"] is None
+
+
+def test_diff_snapshot_can_skip_text_diffs(tmp_path):
+    """The include_text_diff flag lets callers request paths-only modified list."""
+    wd = _workspace(tmp_path)
+    (wd / "x.txt").write_text("old")
+    snap = S.take_snapshot(wd)
+    (wd / "x.txt").write_text("new")
+    delta = S.diff_snapshot(snap, include_text_diff=False)
+    assert delta["modified"] == [{"path": "x.txt"}]
+
+
+def test_diff_to_engine_wrapper(tmp_path):
+    """Reversibility.diff_to loads the snapshot and delegates to diff_snapshot."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    wd = _workspace(tmp_path)
+    (wd / "a.txt").write_text("a")
+    rev = Reversibility(workdir=str(wd), rules=load_rules(str(wd)))
+    rev.before_action("write", "a.txt", reversible=True)
+    (wd / "a.txt").write_text("b")
+
+    entries = rev.history()
+    delta = rev.diff_to(entries[-1].snapshot_before)
+    assert delta["modified"][0]["path"] == "a.txt"
