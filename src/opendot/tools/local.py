@@ -495,7 +495,10 @@ class Toolbox:
             p_dst = self._resolve(dst)
             if not p_src.exists():
                 return f"error: file not found: {p_src}"
-            if p_src.resolve() == p_dst.resolve():
+            # Lexical comparison only (os.path.normpath), NOT Path.resolve() —
+            # resolve() dereferences symlinks, which would wrongly treat two
+            # distinct symlinks pointing at the same target as "the same path".
+            if os.path.normpath(str(p_src)) == os.path.normpath(str(p_dst)):
                 # Same path either way — nothing to do, and critically must NOT
                 # fall into the overwrite=True unlink-then-move path below, which
                 # would delete src (since dst IS src) before the move can run.

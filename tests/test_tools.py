@@ -346,6 +346,23 @@ def test_move_same_src_and_dst_with_overwrite_is_a_no_op(tmp_path):
     assert (wd / "src" / "b.py").read_text() == "z = 3\n"
 
 
+def test_move_symlink_aliasing_is_not_treated_as_same_path(tmp_path):
+    """Two distinct symlinks that happen to resolve to the same target must not
+    be treated as a same-path no-op — Path.resolve() dereferences symlinks,
+    which would wrongly conflate two different paths as identical."""
+    tb, wd, _ = _tb(tmp_path)
+    target = wd / "src" / "b.py"
+    link_a = wd / "link_a.py"
+    link_b = wd / "link_b.py"
+    link_a.symlink_to(target)
+    link_b.symlink_to(target)
+
+    out = tb.call("move", {"src": "link_a.py", "dst": "link_b.py"})
+
+    assert "no change" not in out
+    assert "already exists" in out
+
+
 def test_move_dst_parent_is_a_file_returns_clean_error(tmp_path):
     """If dst's parent path component is actually an existing file (not a
     directory), mkdir(parents=True) raises — this must surface as the same
