@@ -123,6 +123,16 @@ class Reversibility:
         snap = snapshots.load_snapshot(self.project_id, snapshot_id)
         return snapshots.restore_snapshot(snap, self.rules)
 
+    def diff_to(self, snapshot_id: str) -> dict:
+        """Dry-run comparison: what would change if we restored ``snapshot_id``?
+
+        Returns a dict with ``added``, ``removed``, and ``modified`` keys describing
+        the delta between the snapshot and the current workspace. This is read-only
+        and never mutates the workspace.
+        """
+        snap = snapshots.load_snapshot(self.project_id, snapshot_id)
+        return snapshots.diff_snapshot(snap, self.rules)
+
     def undo_last(self) -> LedgerEntry | None:
         """Revert the most recent action (restore its before-snapshot).
 

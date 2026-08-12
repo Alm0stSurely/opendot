@@ -439,7 +439,8 @@ class OpendotTUI(App):
         a = self.agent
         if cmd == "help":
             self._write(
-                "commands: /log /undo [id] /clear /compact /model /provider /mcp /composio /help",
+                "commands: /log /diff <id> /undo [id] /clear /compact /model "
+                "/provider /mcp /composio /help",
                 "sys",
             )
         elif cmd == "clear":
@@ -466,6 +467,8 @@ class OpendotTUI(App):
                 self.run_worker(self._clear_log(), exclusive=False)
             else:
                 self.action_log()
+        elif cmd == "diff":
+            self._do_diff(rest.strip() or None)
         elif cmd == "undo":
             self._do_undo(rest.strip() or None)
         else:
@@ -797,6 +800,30 @@ class OpendotTUI(App):
     def action_undo(self) -> None:
         if not self._busy:
             self._do_undo(None)
+
+    def _do_diff(self, snap_id: str | None) -> None:
+        """Preview what `/undo <id>` would change, without touching the disk."""
+        if not snap_id:
+            self._write("usage: /diff <id>  (see /log for ids)", "sys")
+            return
+        rev = self.agent.reversibility
+        entries = rev.history()
+        target = next((e for e in entries if e.id == snap_id or e.id[-3:] == snap_id), None)
+        if not target:
+            self._write(f"no action {snap_id} (see /log)", "sys")
+            return
+        if not target.snapshot_before:
+            self._write(f"action {target.id} has no snapshot to diff", "sys")
+            return
+        delta = rev.diff_to(target.snapshot_before)
+        if not (delta["added"] or delta["removed"] or delta["modified"]):
+            self._write("workspace already matches the snapshot", "sys")
+            return
+        lines = [f"diff for {target.id} ({target.kind}):"]
+        lines += [f"  + {p}  (would be created)" for p in delta["added"]]
+        lines += [f"  - {p}  (would be deleted)" for p in delta["removed"]]
+        lines += [f"  ~ {item['path']}  (content differs)" for item in delta["modified"]]
+        self._write("\n".join(lines), "sys")
 
     def _do_undo(self, snap_id: str | None) -> None:
         rev = self.agent.reversibility

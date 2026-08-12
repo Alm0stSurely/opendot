@@ -30,6 +30,7 @@ SLASH_HELP = """\
 [bold]Commands[/bold]
   /help     show this help
   /log      show the auditable history of actions taken
+  /diff     preview what /undo <id> would change, without touching disk
   /undo     revert the last action ( /undo <id> to restore to a point )
   /clear    reset the conversation
   /compact  trim old conversation turns to free up context
@@ -180,6 +181,44 @@ def _cmd_undo(workdir: str, snap_id: str | None) -> None:
             return
         console.print(f"[green]undid[/green] last action ({undone.kind}: {undone.detail[:50]})")
         _note_lockfiles(console, rev.last_changed_lockfiles)
+
+
+def _cmd_diff(workdir: str, snap_id: str) -> None:
+    """`opendot diff <id>` — show what `opendot undo <id>` would change."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    rev = Reversibility(workdir=workdir, rules=load_rules(workdir))
+    entries = rev.history()
+    if not entries:
+        console.print("[dim]no actions recorded yet[/dim]")
+        return
+    target = next((e for e in entries if e.id == snap_id), None)
+    if target is None:
+        console.print(f"[red]no action with id {snap_id}[/red]  (see: opendot log)")
+        return
+    if not target.snapshot_before:
+        console.print(f"[yellow]action {snap_id} has no snapshot to diff[/yellow]")
+        return
+
+    delta = rev.diff_to(target.snapshot_before)
+    console.print(f"[bold]diff for {snap_id}[/bold] ({target.kind}: {target.detail[:50]})")
+
+    if not (delta["added"] or delta["removed"] or delta["modified"]):
+        console.print("[dim]workspace already matches the snapshot[/dim]")
+        return
+
+    for path in delta["added"]:
+        console.print(f"  [green]+[/green] {path}  (would be created)")
+    for path in delta["removed"]:
+        console.print(f"  [red]-[/red] {path}  (would be deleted)")
+    for item in delta["modified"]:
+        path = item["path"]
+        console.print(f"  [yellow]~[/yellow] {path}  (content differs)")
+        diff_text = item.get("unified_diff")
+        if diff_text:
+            # markup=False so diff content containing [..] isn't parsed as Rich markup.
+            console.print(diff_text, highlight=False, markup=False)
 
 
 def _note_lockfiles(console, changed: list[str]) -> None:
@@ -417,6 +456,13 @@ def _interactive(agent: Agent) -> None:
         if low == "/log":
             _cmd_log(agent.config.workdir)
             continue
+        if low.startswith("/diff"):
+            parts = text.split(maxsplit=1)
+            if len(parts) > 1:
+                _cmd_diff(agent.config.workdir, parts[1].strip())
+            else:
+                console.print("[dim]usage: /diff <id>  (see /log for ids)[/dim]")
+            continue
         if low.startswith("/undo"):
             parts = text.split(maxsplit=1)
             _cmd_undo(agent.config.workdir, parts[1].strip() if len(parts) > 1 else None)
@@ -476,6 +522,10 @@ def main() -> None:
     )
     p_undo = sub.add_parser("undo", help="Restore the workspace (last action, or to a given id).")
     p_undo.add_argument("id", nargs="?", help="Action id from `opendot log` (default: last).")
+    p_diff = sub.add_parser(
+        "diff", help="Show what `opendot undo <id>` would change, without touching disk."
+    )
+    p_diff.add_argument("id", help="Action id from `opendot log`.")
 
     # opendot mcp add/list/remove
     p_mcp = sub.add_parser("mcp", help="Manage MCP servers opendot connects to.")
@@ -527,6 +577,9 @@ def main() -> None:
         return
     if args.command == "undo":
         _cmd_undo(workdir, args.id)
+        return
+    if args.command == "diff":
+        _cmd_diff(workdir, args.id)
         return
     if args.command == "mcp":
         _cmd_mcp(args)
