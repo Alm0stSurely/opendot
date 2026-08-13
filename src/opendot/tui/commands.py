@@ -12,6 +12,8 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/diff", "preview what /undo <id> would change ( /diff <id> )"),
     ("/undo", "revert the last action ( /undo <id> )"),
     ("/clear", "reset the conversation"),
+    ("/save", "save this project's conversation"),
+    ("/resume", "reload this project's saved conversation"),
     ("/compact", "trim old turns to free context"),
     ("/help", "list commands"),
 ]

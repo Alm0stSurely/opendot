@@ -227,6 +227,13 @@ class OpendotTUI(App):
         # Start on the welcome screen (logo only); first message reveals the rest.
         self.screen.add_class("-welcome")
         self.query_one("#input", Input).focus()
+        if len(getattr(self.agent, "messages", [])) > 1:
+            self._dismiss_welcome()
+            self._write(
+                f"session resumed: {len(self.agent.messages) - 1} message(s), "
+                f"model {self.agent.config.model}",
+                "sys",
+            )
 
     # -- transcript helpers --
     def _write(self, renderable, cls: str = "") -> None:
@@ -439,7 +446,7 @@ class OpendotTUI(App):
         a = self.agent
         if cmd == "help":
             self._write(
-                "commands: /log /diff <id> /undo [id] /clear /compact /model "
+                "commands: /log /diff <id> /undo [id] /clear /save /resume /compact /model "
                 "/provider /mcp /composio /help",
                 "sys",
             )
@@ -447,6 +454,21 @@ class OpendotTUI(App):
             a.reset()
             self._clear_transcript()
             self._write("cleared — screen and conversation reset", "sys")
+        elif cmd == "save":
+            try:
+                a.save_session()
+                self._write("session saved", "sys")
+            except OSError as exc:
+                self._write(f"could not save session: {exc}", "err")
+        elif cmd == "resume":
+            if a.load_session():
+                self._write(
+                    f"session resumed: {len(a.messages) - 1} message(s), model {a.config.model}",
+                    "sys",
+                )
+                self._refresh_sidebar()
+            else:
+                self._write("no valid saved session for this project", "sys")
         elif cmd == "compact":
             n = a.compact()
             self._write(f"compacted: dropped {n} old message(s)", "sys")

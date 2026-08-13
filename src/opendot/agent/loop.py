@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, AsyncIterator
 
 from opendot.agent.config import AgentConfig
@@ -122,6 +123,58 @@ class Agent:
     def reset(self) -> None:
         """Clear the conversation (the /clear context-reset barrier), keeping system."""
         self.messages = self.messages[:1]
+
+    def _session_path(self) -> Path:
+        from opendot.reversibility.snapshots import project_id_for, store_root
+
+        project_id = project_id_for(self.config.workdir)
+        return store_root() / "sessions" / f"{project_id}.json"
+
+    def save_session(self) -> Path:
+        """Persist this project's conversation and return the session path."""
+        path = self._session_path()
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        payload = {
+            "version": 1,
+            "workdir": str(Path(self.config.workdir).resolve()),
+            "model": self.config.model,
+            "messages": self.messages,
+        }
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.chmod(0o600)
+        temp.replace(path)
+        return path
+
+    def load_session(self) -> bool:
+        """Resume this project's saved conversation, or leave this agent fresh."""
+        try:
+            payload = json.loads(self._session_path().read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return False
+
+        messages = payload.get("messages") if isinstance(payload, dict) else None
+        model = payload.get("model") if isinstance(payload, dict) else None
+        saved_workdir = payload.get("workdir") if isinstance(payload, dict) else None
+        version = payload.get("version") if isinstance(payload, dict) else None
+        if (
+            version != 1
+            or not isinstance(messages, list)
+            or not messages
+            or not all(isinstance(message, dict) for message in messages)
+            or messages[0].get("role") != "system"
+            or not isinstance(model, str)
+            or not model
+            or not isinstance(saved_workdir, str)
+            or Path(saved_workdir).resolve() != Path(self.config.workdir).resolve()
+        ):
+            return False
+
+        # Keep today's system/project prompt rather than reviving a stale copy.
+        self.messages = self.messages[:1] + messages[1:]
+        self.config.model = model
+        self.reversibility.model = model
+        return True
 
     def compact(self, keep_recent: int = 6) -> int:
         """Trim old turns to fight context bloat, keeping the system prompt and
