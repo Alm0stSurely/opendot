@@ -32,6 +32,7 @@ SLASH_HELP = """\
   /log      show the auditable history of actions taken
   /diff     preview what /undo <id> would change, without touching disk
   /undo     revert the last action ( /undo <id> to restore to a point )
+  /redo     re-apply the action /undo just reverted
   /clear    reset the conversation
   /save     save this project's conversation
   /resume   reload this project's saved conversation
@@ -170,6 +171,9 @@ def _cmd_undo(workdir: str, snap_id: str | None) -> None:
             console.print(f"[red]no action with id {snap_id}[/red]  (see: opendot log)")
             return
         changed_locks = rev.restore_to(target.snapshot_before)
+        # An explicit jump leaves the undo/redo walk, so the cursor no longer
+        # describes where the workspace is.
+        rev.clear_redo()
         console.print(
             f"[green]restored[/green] workspace to before action {snap_id} ({target.kind}: {target.detail[:50]})"
         )
@@ -182,7 +186,22 @@ def _cmd_undo(workdir: str, snap_id: str | None) -> None:
             )
             return
         console.print(f"[green]undid[/green] last action ({undone.kind}: {undone.detail[:50]})")
+        console.print("[dim]run `opendot redo` to put it back[/dim]")
         _note_lockfiles(console, rev.last_changed_lockfiles)
+
+
+def _cmd_redo(workdir: str) -> None:
+    """`opendot redo` — re-apply the action the last undo reverted."""
+    from opendot.reversibility.engine import Reversibility
+    from opendot.reversibility.rules import load_rules
+
+    rev = Reversibility(workdir=workdir, rules=load_rules(workdir))
+    redone = rev.redo()
+    if redone is None:
+        console.print("[dim]nothing to redo[/dim]")
+        return
+    console.print(f"[green]redid[/green] action ({redone.kind}: {redone.detail[:50]})")
+    _note_lockfiles(console, rev.last_changed_lockfiles)
 
 
 def _cmd_diff(workdir: str, snap_id: str) -> None:
@@ -481,6 +500,9 @@ def _interactive(agent: Agent) -> None:
             else:
                 console.print("[dim]usage: /diff <id>  (see /log for ids)[/dim]")
             continue
+        if low.startswith("/redo"):  # before /undo: neither prefixes the other,
+            _cmd_redo(agent.config.workdir)  # but keep them adjacent and explicit
+            continue
         if low.startswith("/undo"):
             parts = text.split(maxsplit=1)
             _cmd_undo(agent.config.workdir, parts[1].strip() if len(parts) > 1 else None)
@@ -540,6 +562,7 @@ def main() -> None:
     )
     p_undo = sub.add_parser("undo", help="Restore the workspace (last action, or to a given id).")
     p_undo.add_argument("id", nargs="?", help="Action id from `opendot log` (default: last).")
+    sub.add_parser("redo", help="Re-apply the action `opendot undo` just reverted.")
     p_diff = sub.add_parser(
         "diff", help="Show what `opendot undo <id>` would change, without touching disk."
     )
@@ -596,6 +619,9 @@ def main() -> None:
         return
     if args.command == "undo":
         _cmd_undo(workdir, args.id)
+        return
+    if args.command == "redo":
+        _cmd_redo(workdir)
         return
     if args.command == "diff":
         _cmd_diff(workdir, args.id)

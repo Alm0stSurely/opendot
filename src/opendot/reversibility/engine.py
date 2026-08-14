@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from opendot.reversibility import ledger, snapshots
+from opendot.reversibility import ledger, redo, snapshots
 from opendot.reversibility.ledger import ActionKind, LedgerEntry
 from opendot.reversibility.snapshots import IgnoreRules, project_id_for
 
@@ -60,6 +60,9 @@ class Reversibility:
         """
         if not self.enabled:
             return ""
+        # A new action branches the history: whatever we had undone is no longer
+        # reachable, so the redo stack goes (standard editor semantics).
+        redo.clear(self.project_id)
         if not snapshot:
             # No snapshot is taken, so derive a sortable id from the shared
             # action-id counter (snapshots + ledger both feed it), keeping ids
@@ -110,7 +113,18 @@ class Reversibility:
     def clear_history(self) -> int:
         """Clear this project's action ledger (discards undo history). Returns
         the number of entries removed."""
+        redo.clear(self.project_id)
         return ledger.clear(self.project_id)
+
+    def clear_redo(self) -> None:
+        """Drop the redo stack. For callers that move the workspace outside the
+        undo/redo walk (e.g. `opendot undo <id>` jumping to an arbitrary point),
+        after which the cursor no longer describes where we are."""
+        redo.clear(self.project_id)
+
+    def redo_available(self) -> int:
+        """How many actions could currently be re-applied."""
+        return redo.read(self.project_id, len(self.history())).undone
 
     def restore_to(self, snapshot_id: str) -> list[str]:
         """Restore the workspace to the state captured in ``snapshot_id``.
@@ -134,19 +148,64 @@ class Reversibility:
         return snapshots.diff_snapshot(snap, self.rules)
 
     def undo_last(self) -> LedgerEntry | None:
-        """Revert the most recent action (restore its before-snapshot).
+        """Revert the most recent not-yet-undone action (restore its before-snapshot).
 
-        Returns the entry that was undone, or None if there's nothing to undo.
-        Any dependency lockfiles the restore changed are left in
-        ``last_changed_lockfiles`` for the caller to warn about.
+        Repeated calls walk further back through the history rather than
+        restoring the same snapshot again. Returns the entry that was undone, or
+        None if there's nothing left to undo. Any dependency lockfiles the
+        restore changed are left in ``last_changed_lockfiles`` for the caller to
+        warn about.
         """
         self.last_changed_lockfiles = []
         entries = self.history()
         if not entries:
             return None
-        last_entry = entries[-1]
-        if not last_entry.snapshot_before:
+        state = redo.read(self.project_id, len(entries))
+        if state.undone >= len(entries):
+            return None  # already walked back past the first action
+        target = entries[-1 - state.undone]
+        if not target.snapshot_before:
             # A no-snapshot action (OPENDOT_NO_SNAPSHOT) has nothing to restore.
             return None
-        self.last_changed_lockfiles = self.restore_to(last_entry.snapshot_before)
-        return last_entry
+
+        if state.undone == 0:
+            # The state we're leaving is the head, and no later action snapshotted
+            # it. Capture it now or redo has nothing to come back to. Every other
+            # "after" state is some other action's snapshot_before.
+            state.head_snapshot = snapshots.take_snapshot(self.workdir, self.rules).id
+
+        self.last_changed_lockfiles = self.restore_to(target.snapshot_before)
+        state.undone += 1
+        redo.write(self.project_id, state)
+        return target
+
+    def redo(self) -> LedgerEntry | None:
+        """Re-apply the most recently undone action.
+
+        Returns the entry that was re-applied, or None if there's nothing to
+        redo. Like ``undo_last``, any lockfiles the restore changed are left in
+        ``last_changed_lockfiles``.
+        """
+        self.last_changed_lockfiles = []
+        entries = self.history()
+        state = redo.read(self.project_id, len(entries))
+        if not state.can_redo:
+            return None
+
+        # With `undone` actions reverted, the one to re-apply is the first of
+        # them. Its "after" state is the next action's before-snapshot, or the
+        # captured head when it is the newest action.
+        target_index = len(entries) - state.undone
+        target = entries[target_index]
+        after = (
+            state.head_snapshot
+            if target_index == len(entries) - 1
+            else entries[target_index + 1].snapshot_before
+        )
+        if not after:
+            return None
+
+        self.last_changed_lockfiles = self.restore_to(after)
+        state.undone -= 1
+        redo.write(self.project_id, state)
+        return target
