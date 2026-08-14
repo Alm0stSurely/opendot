@@ -132,9 +132,7 @@ def build_office_tools(box) -> list:
         wb.save(p)
         return f"{box._rel(p)} [{ws.title}] {cell}: {old!r} → {v!r}"
 
-    def append_rows(
-        path: str, rows: list, sheet: str | None = None, text: bool = False
-    ) -> str:
+    def append_rows(path: str, rows: list, sheet: str | None = None, text: bool = False) -> str:
         """Append whole rows after a sheet's last row, in one snapshot."""
         import openpyxl
 
@@ -142,7 +140,7 @@ def build_office_tools(box) -> list:
         if not p.exists():
             return f"error: file not found: {p}"
         if not isinstance(rows, list) or not rows:
-            return "error: rows must be a non-empty list of rows, e.g. [[\"a\", 1], [\"b\", 2]]"
+            return 'error: rows must be a non-empty list of rows, e.g. [["a", 1], ["b", 2]]'
         # A flat ["a", "b"] is the likely mistake, and openpyxl would silently
         # write it as one cell per row rather than one row. Reject it instead.
         for i, row in enumerate(rows):
@@ -151,9 +149,15 @@ def build_office_tools(box) -> list:
                     f"error: row {i} is {type(row).__name__}, not a list; "
                     'pass a list of rows, e.g. [["a", 1], ["b", 2]]'
                 )
+            if not row:
+                return f"error: row {i} is empty; each row must have at least one cell value"
 
         wb = openpyxl.load_workbook(p)
         names = wb.sheetnames
+        # An explicit empty sheet name is a caller mistake, not "use the default"
+        # (create_sheet rejects it too).
+        if sheet == "":
+            return "error: sheet name must not be empty"
         if sheet and sheet not in names:
             return f"error: no sheet {sheet!r}; sheets: {', '.join(names)}"
         ws = wb[sheet] if sheet else wb[names[0]]
@@ -169,11 +173,13 @@ def build_office_tools(box) -> list:
         first_new_row = 1 if empty else ws.max_row + 1
         for i, row in enumerate(rows):
             for j, v in enumerate(row):
-                ws.cell(
-                    row=first_new_row + i,
-                    column=j + 1,
-                    value=v if text or not isinstance(v, str) else _coerce_cell_value(v),
-                )
+                if text:
+                    cell_value = str(v)  # force text, incl. non-string values
+                elif isinstance(v, str):
+                    cell_value = _coerce_cell_value(v)
+                else:
+                    cell_value = v  # already a JSON number/bool — keep as-is
+                ws.cell(row=first_new_row + i, column=j + 1, value=cell_value)
         wb.save(p)
         last_new_row = first_new_row + len(rows) - 1
         return (
@@ -203,7 +209,7 @@ def build_office_tools(box) -> list:
 
         wb.create_sheet(title=name)
         wb.save(p)
-        return f"{box._rel(p)}: created sheet {name!r}  sheets: {', '.join(wb.sheetnames)}"
+        return f"{box._rel(p)}: created sheet {name!r} sheets: {', '.join(wb.sheetnames)}"
 
     # ---- pptx ----
     def read_pptx(path: str, max_slides: int = 50) -> str:
@@ -335,8 +341,7 @@ def build_office_tools(box) -> list:
                     "text": {
                         "type": "boolean",
                         "description": (
-                            "Write every value as text without numeric coercion. "
-                            "Default false."
+                            "Write every value as text without numeric coercion. Default false."
                         ),
                     },
                 },

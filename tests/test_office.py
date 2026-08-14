@@ -555,3 +555,35 @@ def test_append_rows_handles_ragged_rows(tmp_path):
     ws = openpyxl.load_workbook(wd / "data.xlsx").active
     assert [ws["A3"].value, ws["B3"].value] == ["bob", None]
     assert [ws["A4"].value, ws["B4"].value, ws["C4"].value] == ["carol", 95, "extra"]
+
+
+def test_append_rows_rejects_empty_sheet_name(tmp_path):
+    # An explicit empty sheet name is a caller mistake, not "use the default".
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    out = tb.call("append_rows", {"path": "data.xlsx", "rows": [["x"]], "sheet": ""})
+    assert "must not be empty" in out
+
+
+def test_append_rows_rejects_empty_row(tmp_path):
+    # An empty inner row would write no cells; reject it rather than report a
+    # phantom appended row.
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    before = (wd / "data.xlsx").read_bytes()
+    out = tb.call("append_rows", {"path": "data.xlsx", "rows": [["ok"], []]})
+    assert "empty" in out
+    assert (wd / "data.xlsx").read_bytes() == before  # nothing written
+
+
+def test_append_rows_text_flag_forces_non_string_to_text(tmp_path):
+    # text=True forces every value to a string, including a JSON number.
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    tb.call("append_rows", {"path": "data.xlsx", "rows": [[80, "007"]], "text": True})
+
+    import openpyxl
+
+    ws = openpyxl.load_workbook(wd / "data.xlsx").active
+    assert ws["A3"].value == "80" and isinstance(ws["A3"].value, str)
+    assert ws["B3"].value == "007"
