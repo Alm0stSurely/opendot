@@ -88,6 +88,9 @@ class OpendotTUI(App):
 
     BINDINGS = [
         Binding("ctrl+z", "undo", "Undo last action"),
+        # ctrl+shift+z is the editor convention but many terminals don't
+        # distinguish it from ctrl+z; ctrl+y is the one that reliably arrives.
+        Binding("ctrl+y", "redo", "Redo last undo"),
         Binding("ctrl+l", "log", "Show ledger note"),
         Binding("escape", "interrupt", "Interrupt", show=False),
         Binding("ctrl+c", "quit", "Quit"),
@@ -446,7 +449,7 @@ class OpendotTUI(App):
         a = self.agent
         if cmd == "help":
             self._write(
-                "commands: /log /diff <id> /undo [id] /clear /save /resume /compact /model "
+                "commands: /log /diff <id> /undo [id] /redo /clear /save /resume /compact /model "
                 "/provider /mcp /composio /help",
                 "sys",
             )
@@ -493,6 +496,8 @@ class OpendotTUI(App):
             self._do_diff(rest.strip() or None)
         elif cmd == "undo":
             self._do_undo(rest.strip() or None)
+        elif cmd == "redo":
+            self._do_redo()
         else:
             self._write(f"unknown command: /{cmd}", "sys")
 
@@ -823,6 +828,10 @@ class OpendotTUI(App):
         if not self._busy:
             self._do_undo(None)
 
+    def action_redo(self) -> None:
+        if not self._busy:
+            self._do_redo()
+
     def _do_diff(self, snap_id: str | None) -> None:
         """Preview what `/undo <id>` would change, without touching the disk."""
         if not snap_id:
@@ -858,7 +867,13 @@ class OpendotTUI(App):
             if not target:
                 self._write(f"no action {snap_id} (see /log)", "sys")
                 return
+            if not target.snapshot_before:
+                self._write(f"action {target.id} has no snapshot to undo", "sys")
+                return
             changed_locks = rev.restore_to(target.snapshot_before)
+            # An explicit jump leaves the undo/redo walk; the cursor no longer
+            # describes where the workspace is.
+            rev.clear_redo()
             what = f"action {target.id} ({target.kind}: {target.detail.rsplit('/', 1)[-1]})"
         else:
             undone = rev.undo_last()
@@ -876,6 +891,26 @@ class OpendotTUI(App):
         if self._busy:
             return  # a turn is already running; don't stack another
         note = f"[undo] Reverted {what}."
+        if changed_locks:
+            note += f" Changed lockfile(s): {', '.join(changed_locks)}."
+        self._busy = True
+        self._turn_worker = self.run_worker(self._run_turn(note), exclusive=True)
+
+    def _do_redo(self) -> None:
+        """Re-apply what /undo just reverted. Mirrors _do_undo's ack + narration."""
+        rev = self.agent.reversibility
+        redone = rev.redo()
+        if redone is None:
+            self._write("nothing to redo", "sys")
+            return
+        changed_locks = rev.last_changed_lockfiles
+        what = f"the last undone action ({redone.kind}: {redone.detail.rsplit('/', 1)[-1]})"
+
+        self._write(f"↻ reapplied {what}", "sys")  # immediate, deterministic ack
+        self._refresh_sidebar()
+        if self._busy:
+            return  # a turn is already running; don't stack another
+        note = f"[redo] Reapplied {what}."
         if changed_locks:
             note += f" Changed lockfile(s): {', '.join(changed_locks)}."
         self._busy = True
