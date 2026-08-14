@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -140,9 +141,13 @@ class Agent:
             "model": self.config.model,
             "messages": self.messages,
         }
+        # Create the temp file 0600 from the start (not write-then-chmod), so the
+        # conversation content is never briefly readable at the umask default.
         temp = path.with_suffix(".tmp")
-        temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp.chmod(0o600)
+        data = json.dumps(payload, ensure_ascii=False, indent=2)
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(data)
         temp.replace(path)
         return path
 

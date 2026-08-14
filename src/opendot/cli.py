@@ -643,6 +643,10 @@ def main() -> None:
         agent = _build_agent(args.model, workdir, confirm=lambda _p: False, api_base=args.api_base)
         if args.command == "resume":
             agent.load_session()
+            # load_session may have changed the model; warn early like the other
+            # paths so a missing key surfaces now, not mid-turn.
+            if not args.api_base:
+                _warn_if_missing_key(agent.config.model)
         run_tui(agent)
 
 
