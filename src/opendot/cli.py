@@ -33,6 +33,8 @@ SLASH_HELP = """\
   /diff     preview what /undo <id> would change, without touching disk
   /undo     revert the last action ( /undo <id> to restore to a point )
   /clear    reset the conversation
+  /save     save this project's conversation
+  /resume   reload this project's saved conversation
   /compact  trim old conversation turns to free up context
   /model    show the current model ( /model <id> to switch )
   /provider connect a provider ( /provider <ENV_VAR> <api-key> )
@@ -419,6 +421,22 @@ def _interactive(agent: Agent) -> None:
             agent.reset()
             console.print("[dim]context cleared[/dim]")
             continue
+        if low == "/save":
+            try:
+                agent.save_session()
+                console.print("[dim]session saved[/dim]")
+            except OSError as exc:
+                console.print(f"[red]could not save session:[/red] {exc}")
+            continue
+        if low == "/resume":
+            if agent.load_session():
+                console.print(
+                    f"[dim]session resumed: {len(agent.messages) - 1} message(s), "
+                    f"model {agent.config.model}[/dim]"
+                )
+            else:
+                console.print("[dim]no valid saved session for this project[/dim]")
+            continue
         if low == "/compact":
             dropped = agent.compact()
             console.print(f"[dim]compacted: dropped {dropped} old message(s)[/dim]")
@@ -526,6 +544,7 @@ def main() -> None:
         "diff", help="Show what `opendot undo <id>` would change, without touching disk."
     )
     p_diff.add_argument("id", help="Action id from `opendot log`.")
+    sub.add_parser("resume", help="Resume this project's saved conversation.")
 
     # opendot mcp add/list/remove
     p_mcp = sub.add_parser("mcp", help="Manage MCP servers opendot connects to.")
@@ -586,7 +605,7 @@ def main() -> None:
         return
 
     # Everything below this point calls a model — hint if the key looks missing.
-    if not args.api_base:
+    if args.command != "resume" and not args.api_base:
         _warn_if_missing_key(args.model)
 
     # One-shot: -p flag, or piped stdin.
@@ -597,9 +616,23 @@ def main() -> None:
     if oneshot:
         # Non-interactive: can't prompt, so decline irreversible commands by default.
         agent = _build_agent(args.model, workdir, confirm=lambda _p: False, api_base=args.api_base)
+        if args.command == "resume":
+            agent.load_session()
+            if not args.api_base:
+                _warn_if_missing_key(agent.config.model)
         asyncio.run(_run_turn(agent, oneshot))
     elif args.repl:
         agent = _build_agent(args.model, workdir, confirm=_confirm, api_base=args.api_base)
+        if args.command == "resume":
+            if agent.load_session():
+                console.print(
+                    f"[dim]session resumed: {len(agent.messages) - 1} message(s), "
+                    f"model {agent.config.model}[/dim]"
+                )
+            else:
+                console.print("[dim]no valid saved session for this project; starting fresh[/dim]")
+            if not args.api_base:
+                _warn_if_missing_key(agent.config.model)
         _interactive(agent)
     else:
         # Default: the full-screen TUI. It installs its own confirm callback
@@ -608,6 +641,12 @@ def main() -> None:
         from opendot.tui import run_tui
 
         agent = _build_agent(args.model, workdir, confirm=lambda _p: False, api_base=args.api_base)
+        if args.command == "resume":
+            agent.load_session()
+            # load_session may have changed the model; warn early like the other
+            # paths so a missing key surfaces now, not mid-turn.
+            if not args.api_base:
+                _warn_if_missing_key(agent.config.model)
         run_tui(agent)
 
 
