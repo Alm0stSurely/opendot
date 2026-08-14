@@ -340,3 +340,250 @@ def test_read_docx_respects_max_paragraphs(tmp_path):
     full = tb.call("read_docx", {"path": "big.docx"})  # default cap is 200
     assert "Paragraph 10" in full
     assert "more paragraphs" not in full
+
+
+# ---- append_rows / create_sheet ----
+
+
+def test_append_rows_adds_after_the_last_row(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")  # header + one data row (alice)
+
+    res = tb.call(
+        "append_rows",
+        {"path": "data.xlsx", "rows": [["bob", "80"], ["carol", "95"]]},
+    )
+    assert "appended 2 row(s) at 3-4" in res
+
+    import openpyxl
+
+    ws = openpyxl.load_workbook(wd / "data.xlsx").active
+    assert ws.max_row == 4
+    assert [ws["A3"].value, ws["B3"].value] == ["bob", 80]
+    assert [ws["A4"].value, ws["B4"].value] == ["carol", 95]
+    assert ws["A2"].value == "alice"  # existing rows untouched
+
+
+def test_append_rows_coerces_like_edit_cell(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    tb.call(
+        "append_rows",
+        {"path": "data.xlsx", "rows": [["007", "1.5", "=B2*2", "hello"]]},
+    )
+
+    import openpyxl
+
+    ws = openpyxl.load_workbook(wd / "data.xlsx").active
+    assert ws["A3"].value == "007"  # leading zero preserved, as in edit_cell
+    assert ws["B3"].value == 1.5
+    assert ws["C3"].value == "=B2*2"  # formula passes through
+    assert ws["D3"].value == "hello"
+
+
+def test_append_rows_text_flag_keeps_everything_a_string(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    tb.call("append_rows", {"path": "data.xlsx", "rows": [["bob", "80"]], "text": True})
+
+    import openpyxl
+
+    cell = openpyxl.load_workbook(wd / "data.xlsx").active["B3"]
+    assert cell.value == "80"
+    assert isinstance(cell.value, str)
+
+
+def test_append_rows_targets_a_named_sheet(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    _add_xlsx_sheet(wd / "data.xlsx")  # adds "Summary" with one row
+
+    tb.call("append_rows", {"path": "data.xlsx", "rows": [["net", "42"]], "sheet": "Summary"})
+
+    import openpyxl
+
+    wb = openpyxl.load_workbook(wd / "data.xlsx")
+    assert [wb["Summary"]["A2"].value, wb["Summary"]["B2"].value] == ["net", 42]
+    assert wb.active.max_row == 2  # first sheet untouched
+
+
+def test_append_rows_is_undoable(tmp_path):
+    tb, wd, rev = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    before = (wd / "data.xlsx").read_bytes()
+
+    tb.call("append_rows", {"path": "data.xlsx", "rows": [["bob", "80"]]})
+
+    import openpyxl
+
+    assert openpyxl.load_workbook(wd / "data.xlsx").active.max_row == 3
+    rev.undo_last()  # restore the binary file exactly
+    assert (wd / "data.xlsx").read_bytes() == before
+
+
+def test_append_rows_rejects_a_flat_list(tmp_path):
+    """["a", "b"] is the likely mistake; openpyxl would write it as two rows."""
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    before = (wd / "data.xlsx").read_bytes()
+
+    res = tb.call("append_rows", {"path": "data.xlsx", "rows": ["bob", "80"]})
+    assert "not a list" in res
+    assert (wd / "data.xlsx").read_bytes() == before  # nothing written
+
+
+def test_append_rows_empty_is_an_error(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    assert "non-empty list" in tb.call("append_rows", {"path": "data.xlsx", "rows": []})
+
+
+def test_create_sheet_adds_a_named_sheet(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+
+    res = tb.call("create_sheet", {"path": "data.xlsx", "name": "Summary"})
+    assert "Summary" in res
+
+    import openpyxl
+
+    assert "Summary" in openpyxl.load_workbook(wd / "data.xlsx").sheetnames
+
+
+def test_create_sheet_rejects_an_existing_name(tmp_path):
+    """openpyxl would silently make 'Summary1'; the agent must be told instead."""
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    _add_xlsx_sheet(wd / "data.xlsx")
+
+    res = tb.call("create_sheet", {"path": "data.xlsx", "name": "Summary"})
+    assert "already exists" in res
+
+    import openpyxl
+
+    assert openpyxl.load_workbook(wd / "data.xlsx").sheetnames.count("Summary") == 1
+    assert "Summary1" not in openpyxl.load_workbook(wd / "data.xlsx").sheetnames
+
+
+def test_create_sheet_is_undoable(tmp_path):
+    tb, wd, rev = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    before = (wd / "data.xlsx").read_bytes()
+
+    tb.call("create_sheet", {"path": "data.xlsx", "name": "Summary"})
+
+    import openpyxl
+
+    assert "Summary" in openpyxl.load_workbook(wd / "data.xlsx").sheetnames
+    rev.undo_last()
+    assert (wd / "data.xlsx").read_bytes() == before
+
+
+def test_append_rows_outside_workspace_is_irreversible(tmp_path):
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: True)
+
+    outside = tmp_path / "outside.xlsx"
+    _make_xlsx(outside)
+
+    res = tb.call("append_rows", {"path": str(outside), "rows": [["bob", "80"]]})
+    assert "appended 1 row(s)" in res
+    last = rev.history()[-1]
+    assert last.reversible is False
+    assert "not undoable" in last.note
+
+
+def test_append_rows_outside_declined_writes_nothing(tmp_path):
+    wd = tmp_path / "ws"
+    wd.mkdir()
+    rev = Reversibility(workdir=str(wd), rules=IgnoreRules())
+    tb = Toolbox(str(wd), reversibility=rev, confirm=lambda p: False)
+
+    outside = tmp_path / "outside.xlsx"
+    _make_xlsx(outside)
+    before = outside.read_bytes()
+
+    res = tb.call("append_rows", {"path": str(outside), "rows": [["bob", "80"]]})
+    assert "skipped" in res
+    assert outside.read_bytes() == before
+
+
+def test_append_rows_to_a_fresh_sheet_starts_at_row_1(tmp_path):
+    """openpyxl's ws.append() writes to row 2 on an empty sheet; we must not."""
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    tb.call("create_sheet", {"path": "data.xlsx", "name": "Blank"})
+
+    res = tb.call(
+        "append_rows",
+        {"path": "data.xlsx", "rows": [["first", "1"]], "sheet": "Blank"},
+    )
+    assert "at 1-1" in res
+
+    import openpyxl
+
+    ws = openpyxl.load_workbook(wd / "data.xlsx")["Blank"]
+    assert [ws["A1"].value, ws["B1"].value] == ["first", 1]
+    assert ws.max_row == 1  # no stray blank row above it
+
+
+def test_append_rows_twice_keeps_stacking(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    tb.call("append_rows", {"path": "data.xlsx", "rows": [["bob", "80"]]})
+    res = tb.call("append_rows", {"path": "data.xlsx", "rows": [["carol", "95"]]})
+    assert "at 4-4" in res
+
+    import openpyxl
+
+    ws = openpyxl.load_workbook(wd / "data.xlsx").active
+    assert [ws["A3"].value, ws["A4"].value] == ["bob", "carol"]
+
+
+def test_append_rows_handles_ragged_rows(tmp_path):
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    tb.call(
+        "append_rows",
+        {"path": "data.xlsx", "rows": [["bob"], ["carol", "95", "extra"]]},
+    )
+
+    import openpyxl
+
+    ws = openpyxl.load_workbook(wd / "data.xlsx").active
+    assert [ws["A3"].value, ws["B3"].value] == ["bob", None]
+    assert [ws["A4"].value, ws["B4"].value, ws["C4"].value] == ["carol", 95, "extra"]
+
+
+def test_append_rows_rejects_empty_sheet_name(tmp_path):
+    # An explicit empty sheet name is a caller mistake, not "use the default".
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    out = tb.call("append_rows", {"path": "data.xlsx", "rows": [["x"]], "sheet": ""})
+    assert "must not be empty" in out
+
+
+def test_append_rows_rejects_empty_row(tmp_path):
+    # An empty inner row would write no cells; reject it rather than report a
+    # phantom appended row.
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    before = (wd / "data.xlsx").read_bytes()
+    out = tb.call("append_rows", {"path": "data.xlsx", "rows": [["ok"], []]})
+    assert "empty" in out
+    assert (wd / "data.xlsx").read_bytes() == before  # nothing written
+
+
+def test_append_rows_text_flag_forces_non_string_to_text(tmp_path):
+    # text=True forces every value to a string, including a JSON number.
+    tb, wd, _ = _tb(tmp_path)
+    _make_xlsx(wd / "data.xlsx")
+    tb.call("append_rows", {"path": "data.xlsx", "rows": [[80, "007"]], "text": True})
+
+    import openpyxl
+
+    ws = openpyxl.load_workbook(wd / "data.xlsx").active
+    assert ws["A3"].value == "80" and isinstance(ws["A3"].value, str)
+    assert ws["B3"].value == "007"

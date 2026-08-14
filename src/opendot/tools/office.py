@@ -132,6 +132,85 @@ def build_office_tools(box) -> list:
         wb.save(p)
         return f"{box._rel(p)} [{ws.title}] {cell}: {old!r} → {v!r}"
 
+    def append_rows(path: str, rows: list, sheet: str | None = None, text: bool = False) -> str:
+        """Append whole rows after a sheet's last row, in one snapshot."""
+        import openpyxl
+
+        p = box._resolve(path)
+        if not p.exists():
+            return f"error: file not found: {p}"
+        if not isinstance(rows, list) or not rows:
+            return 'error: rows must be a non-empty list of rows, e.g. [["a", 1], ["b", 2]]'
+        # A flat ["a", "b"] is the likely mistake, and openpyxl would silently
+        # write it as one cell per row rather than one row. Reject it instead.
+        for i, row in enumerate(rows):
+            if not isinstance(row, list):
+                return (
+                    f"error: row {i} is {type(row).__name__}, not a list; "
+                    'pass a list of rows, e.g. [["a", 1], ["b", 2]]'
+                )
+            if not row:
+                return f"error: row {i} is empty; each row must have at least one cell value"
+
+        wb = openpyxl.load_workbook(p)
+        names = wb.sheetnames
+        # An explicit empty sheet name is a caller mistake, not "use the default"
+        # (create_sheet rejects it too).
+        if sheet == "":
+            return "error: sheet name must not be empty"
+        if sheet and sheet not in names:
+            return f"error: no sheet {sheet!r}; sheets: {', '.join(names)}"
+        ws = wb[sheet] if sheet else wb[names[0]]
+
+        if not _snapshot(p):
+            return "skipped: user declined an edit outside the workspace"
+
+        # An untouched sheet reports max_row == 1 while being empty, and
+        # ws.append() would write to row 2 there, leaving a blank first row.
+        # Compute the target row and write cells directly so the first appended
+        # row is exactly where we say it is.
+        empty = ws.max_row == 1 and all(c.value is None for c in ws[1])
+        first_new_row = 1 if empty else ws.max_row + 1
+        for i, row in enumerate(rows):
+            for j, v in enumerate(row):
+                if text:
+                    cell_value = str(v)  # force text, incl. non-string values
+                elif isinstance(v, str):
+                    cell_value = _coerce_cell_value(v)
+                else:
+                    cell_value = v  # already a JSON number/bool — keep as-is
+                ws.cell(row=first_new_row + i, column=j + 1, value=cell_value)
+        wb.save(p)
+        last_new_row = first_new_row + len(rows) - 1
+        return (
+            f"{box._rel(p)} [{ws.title}]: appended {len(rows)} row(s) "
+            f"at {first_new_row}-{last_new_row}"
+        )
+
+    def create_sheet(path: str, name: str) -> str:
+        """Add a new named sheet to an existing workbook."""
+        import openpyxl
+
+        p = box._resolve(path)
+        if not p.exists():
+            return f"error: file not found: {p}"
+        if not name or not name.strip():
+            return "error: sheet name must not be empty"
+
+        wb = openpyxl.load_workbook(p)
+        names = wb.sheetnames
+        # openpyxl silently uniquifies a clashing title ("Data" -> "Data1"), which
+        # would leave the agent writing to a sheet it didn't ask for. Say no.
+        if name in names:
+            return f"error: sheet {name!r} already exists; sheets: {', '.join(names)}"
+
+        if not _snapshot(p):
+            return "skipped: user declined an edit outside the workspace"
+
+        wb.create_sheet(title=name)
+        wb.save(p)
+        return f"{box._rel(p)}: created sheet {name!r} sheets: {', '.join(wb.sheetnames)}"
+
     # ---- pptx ----
     def read_pptx(path: str, max_slides: int = 50) -> str:
         from pptx import Presentation
@@ -240,6 +319,49 @@ def build_office_tools(box) -> list:
                 "required": ["path", "cell", "value"],
             },
             edit_cell,
+        ),
+        Tool(
+            "append_rows",
+            "Append rows to the end of an .xlsx sheet — use this instead of looping "
+            "edit_cell when writing a table. Values are coerced like edit_cell; pass "
+            "text=true to keep them all as strings. Undoable.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "rows": {
+                        "type": "array",
+                        "description": (
+                            "Rows to append, each a list of cell values, e.g. "
+                            '[["Ada", 1815], ["Alan", 1912]].'
+                        ),
+                        "items": {"type": "array", "items": {}},
+                    },
+                    "sheet": {"type": "string"},
+                    "text": {
+                        "type": "boolean",
+                        "description": (
+                            "Write every value as text without numeric coercion. Default false."
+                        ),
+                    },
+                },
+                "required": ["path", "rows"],
+            },
+            append_rows,
+        ),
+        Tool(
+            "create_sheet",
+            "Add a new named sheet to an existing .xlsx. Errors if the name is "
+            "already taken. Undoable.",
+            {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "name": {"type": "string", "description": "New sheet name."},
+                },
+                "required": ["path", "name"],
+            },
+            create_sheet,
         ),
         Tool(
             "read_pptx",
