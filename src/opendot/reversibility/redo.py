@@ -60,6 +60,8 @@ def read(project_id: str, ledger_len: int) -> RedoState:
         return RedoState(ledger_len=ledger_len)
     try:
         raw = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(raw, dict):
+            raise TypeError("redo cursor must be a JSON object")
         state = RedoState(
             undone=int(raw.get("undone", 0)),
             head_snapshot=str(raw.get("head_snapshot", "")),
@@ -74,11 +76,22 @@ def read(project_id: str, ledger_len: int) -> RedoState:
 
 
 def write(project_id: str, state: RedoState) -> None:
-    _path(project_id).write_text(json.dumps(asdict(state)), encoding="utf-8")
+    # Best-effort: the cursor is safe to lose, so a write failure (read-only
+    # OPENDOT_HOME, full disk, ...) must not abort undo/redo after the workspace
+    # has already been restored — it only disables redo.
+    try:
+        _path(project_id).write_text(json.dumps(asdict(state)), encoding="utf-8")
+    except OSError:
+        pass
 
 
 def clear(project_id: str) -> None:
     """Drop the redo stack. Called whenever a new action makes it meaningless."""
-    p = _path(project_id)
-    if p.exists():
-        p.unlink()
+    # Best-effort: clear() runs inside before_action/clear_history, so a
+    # permission issue here must not stop actions from being recorded.
+    try:
+        p = _path(project_id)
+        if p.exists():
+            p.unlink()
+    except OSError:
+        pass

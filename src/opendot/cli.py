@@ -170,6 +170,9 @@ def _cmd_undo(workdir: str, snap_id: str | None) -> None:
         if target is None:
             console.print(f"[red]no action with id {snap_id}[/red]  (see: opendot log)")
             return
+        if not target.snapshot_before:
+            console.print(f"[yellow]action {snap_id} has no snapshot to undo[/yellow]")
+            return
         changed_locks = rev.restore_to(target.snapshot_before)
         # An explicit jump leaves the undo/redo walk, so the cursor no longer
         # describes where the workspace is.

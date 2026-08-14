@@ -867,6 +867,9 @@ class OpendotTUI(App):
             if not target:
                 self._write(f"no action {snap_id} (see /log)", "sys")
                 return
+            if not target.snapshot_before:
+                self._write(f"action {target.id} has no snapshot to undo", "sys")
+                return
             changed_locks = rev.restore_to(target.snapshot_before)
             # An explicit jump leaves the undo/redo walk; the cursor no longer
             # describes where the workspace is.
