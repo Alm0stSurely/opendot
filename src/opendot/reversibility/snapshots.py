@@ -159,13 +159,16 @@ _MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB
 
 @dataclass
 class FileEntry:
-    """One captured file: content hash, POSIX mode bits, and (mtime, size) so a
-    later snapshot can skip re-hashing an unchanged file."""
+    """One captured file: content hash, POSIX mode bits, and (mtime, size,
+    ctime_ns) so a later snapshot can skip re-hashing an unchanged file. ctime_ns
+    is part of the change signature so a same-size rewrite within one mtime tick
+    is still detected."""
 
     h: str
     mode: int | None = None  # st_mode & 0o777, or None if unknown (old snapshots)
     mtime: float | None = None
     size: int | None = None
+    ctime_ns: int | None = None  # change-time in nanoseconds, used to detect rewrites
 
 
 @dataclass
@@ -215,10 +218,26 @@ def take_snapshot(workdir: str | Path, rules: IgnoreRules | None = None) -> Snap
         except OSError:
             continue
         mode = st.st_mode & 0o777
-        # Fast path: unchanged since the last snapshot → reuse its hash, no read.
+        # Fast path: unchanged since the last snapshot -> reuse its hash, no read.
+        # We compare (mtime, size, ctime_ns). ctime advances on every write even
+        # when mtime is pinned to the same value, so including it prevents a
+        # same-size rewrite inside one mtime tick from reusing a stale hash.
         old = prev.get(rel)
-        if old is not None and old.mtime == st.st_mtime and old.size == st.st_size and old.h:
-            files[rel] = FileEntry(h=old.h, mode=mode, mtime=st.st_mtime, size=st.st_size)
+        if (
+            old is not None
+            and old.h
+            and old.mtime == st.st_mtime
+            and old.size == st.st_size
+            and old.ctime_ns is not None
+            and old.ctime_ns == st.st_ctime_ns
+        ):
+            files[rel] = FileEntry(
+                h=old.h,
+                mode=mode,
+                mtime=st.st_mtime,
+                size=st.st_size,
+                ctime_ns=st.st_ctime_ns,
+            )
             continue
         if st.st_size > _MAX_FILE_BYTES:
             skipped_large.append(rel)
@@ -227,7 +246,9 @@ def take_snapshot(workdir: str | Path, rules: IgnoreRules | None = None) -> Snap
             h = _write_object_from_path(f)  # streams: never loads the file whole
         except OSError:
             continue  # unreadable file: skip rather than fail the whole snapshot
-        files[rel] = FileEntry(h=h, mode=mode, mtime=st.st_mtime, size=st.st_size)
+        files[rel] = FileEntry(
+            h=h, mode=mode, mtime=st.st_mtime, size=st.st_size, ctime_ns=st.st_ctime_ns
+        )
 
     snap_id = _next_snapshot_id(pid)
     snap = Snapshot(
@@ -372,7 +393,7 @@ def _write_manifest(snap: Snapshot) -> None:
                 "project_id": snap.project_id,
                 "workdir": snap.workdir,
                 "files": {
-                    rel: {"h": e.h, "m": e.mode, "t": e.mtime, "s": e.size}
+                    rel: {"h": e.h, "m": e.mode, "t": e.mtime, "s": e.size, "c": e.ctime_ns}
                     for rel, e in snap.files.items()
                 },
                 "skipped_large": snap.skipped_large,
@@ -392,7 +413,13 @@ def load_snapshot(project_id: str, snap_id: str) -> Snapshot:
         if isinstance(v, str):
             files[rel] = FileEntry(h=v, mode=None)
         else:
-            files[rel] = FileEntry(h=v["h"], mode=v.get("m"), mtime=v.get("t"), size=v.get("s"))
+            files[rel] = FileEntry(
+                h=v["h"],
+                mode=v.get("m"),
+                mtime=v.get("t"),
+                size=v.get("s"),
+                ctime_ns=v.get("c"),
+            )
     return Snapshot(
         id=d["id"],
         project_id=d["project_id"],

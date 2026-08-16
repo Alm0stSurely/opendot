@@ -746,3 +746,34 @@ def test_diff_to_engine_wrapper(tmp_path):
     entries = rev.history()
     delta = rev.diff_to(entries[-1].snapshot_before)
     assert delta["modified"][0]["path"] == "a.txt"
+
+
+def test_same_size_rewrite_inside_one_mtime_tick_is_captured(tmp_path):
+    """Regression for issue #115: a same-size rewrite that lands inside one mtime
+    tick must be captured with its new content, not reuse the old hash.
+
+    We pin the file's mtime to a fixed value after writing so the fast path sees
+    identical (mtime, size). The fix relies on ctime_ns, which is updated even when
+    mtime is pinned, to detect the rewrite.
+    """
+    wd = _workspace(tmp_path)
+    f = wd / "f.txt"
+    f.write_text("alpha")  # 5 bytes
+    snap1 = S.take_snapshot(wd)
+
+    # Rewrite to different 5-byte content and pin mtime to the *old* value.
+    f.write_text("omega")  # same size, different content
+    old_stat = f.stat()
+    pinned_mtime_ns = int(snap1.files["f.txt"].mtime * 1_000_000_000)
+    os.utime(f, ns=(old_stat.st_atime_ns, pinned_mtime_ns))
+
+    snap2 = S.take_snapshot(wd)
+
+    # The second snapshot must capture the new content, not reuse the old hash.
+    assert snap2.files["f.txt"].h != snap1.files["f.txt"].h
+
+    # Restoring snap2 must yield the new bytes, and restoring snap1 the old ones.
+    S.restore_snapshot(snap2)
+    assert f.read_text() == "omega"
+    S.restore_snapshot(snap1)
+    assert f.read_text() == "alpha"
