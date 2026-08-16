@@ -91,3 +91,41 @@ def test_add_response_cost_from_tokens():
     assert u.total_tokens == 1500
     assert round(u.cost_usd, 4) == 0.03  # 0.01 + 0.02 from cost_per_token
     assert calls["completion_cost"] == 0  # token-based path was used
+
+
+def test_add_response_records_per_call_trace():
+    """Each add_response appends a CallRecord (model, tokens, cost, latency), and
+    the per-call costs/tokens sum to the running totals."""
+
+    class _StubLiteLLM(types.SimpleNamespace):
+        def cost_per_token(self, model, prompt_tokens, completion_tokens):
+            return (0.01, 0.02)
+
+    u = Usage()
+    u.add_response(
+        types.SimpleNamespace(usage=_Usage()), _StubLiteLLM(), model="gpt-4o", latency_s=1.5
+    )
+    u.add_response(
+        types.SimpleNamespace(usage=_Usage()), _StubLiteLLM(), model="gpt-4o", latency_s=2.0
+    )
+
+    assert len(u.calls) == 2
+    first = u.calls[0]
+    assert first.model == "gpt-4o"
+    assert first.prompt_tokens == 1000 and first.completion_tokens == 500
+    assert round(first.cost_usd, 4) == 0.03
+    assert first.latency_s == 1.5
+    # Per-call costs/tokens sum to the running totals.
+    assert round(sum(r.cost_usd for r in u.calls), 4) == round(u.cost_usd, 4)
+    assert sum(r.prompt_tokens + r.completion_tokens for r in u.calls) == u.total_tokens
+
+
+def test_trace_lines_render():
+    u = Usage()
+    assert u.trace_lines() == ["no model calls yet this session"]
+    u.add_response(
+        types.SimpleNamespace(usage=_Usage()), types.SimpleNamespace(), model="m", latency_s=0.5
+    )
+    lines = u.trace_lines()
+    assert any("m" in ln and "0.50s" in ln for ln in lines)
+    assert any("total:" in ln for ln in lines)

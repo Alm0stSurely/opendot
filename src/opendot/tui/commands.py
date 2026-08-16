@@ -9,6 +9,7 @@ SLASH_COMMANDS: list[tuple[str, str]] = [
     ("/mcp", "manage MCP servers"),
     ("/composio", "connect apps (Gmail, Slack, …)"),
     ("/log", "show the action ledger ( /log clear to wipe it )"),
+    ("/trace", "per-model-call cost and timing for this session"),
     ("/diff", "preview what /undo <id> would change ( /diff <id> )"),
     ("/undo", "revert the last action ( /undo <id> )"),
     ("/redo", "re-apply the action /undo just reverted"),
