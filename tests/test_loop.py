@@ -294,3 +294,88 @@ def test_backoff_delay_is_capped(monkeypatch):
     assert max(sleep_log) <= loop_module._MAX_BACKOFF_SECONDS
     # Naive 2**attempt would reach 512s by the 10th retry; confirm it's capped.
     assert 512 not in sleep_log
+
+
+# --- budget enforcement (#123) ---
+
+
+def _agent_with_real_usage(max_usd=None, max_tokens=None):
+    from opendot.agent.usage import Usage
+
+    a = Agent.__new__(Agent)
+    a.config = AgentConfig(
+        model="gpt-4o", workdir="/tmp", max_retries=0, max_usd=max_usd, max_tokens=max_tokens
+    )
+    a.usage = Usage()
+    a.messages = [{"role": "system", "content": "sys"}]
+    a.toolbox = types.SimpleNamespace(_confirm=None, specs=lambda: [], call=lambda *a, **k: "")
+    a.explorers_enabled = False
+    return a
+
+
+class _BudgetLiteLLM(types.SimpleNamespace):
+    """Fake litellm whose every non-stream call reports 1000 tokens at a fixed
+    per-token cost, so a couple of turns cross a small budget."""
+
+    RateLimitError = real_litellm.RateLimitError
+    APIConnectionError = real_litellm.APIConnectionError
+    Timeout = real_litellm.Timeout
+    InternalServerError = real_litellm.InternalServerError
+    ServiceUnavailableError = real_litellm.ServiceUnavailableError
+    AuthenticationError = real_litellm.AuthenticationError
+    BadRequestError = real_litellm.BadRequestError
+
+    async def acompletion(self, **kw):
+        # Streaming shape (run() tries streaming first): a tool-call delta chunk,
+        # then a usage-only final chunk. The tool call keeps the loop going so,
+        # absent a cap, it would spend on the next turn too.
+        async def gen():
+            tc = types.SimpleNamespace(
+                index=0,
+                id="c1",
+                function=types.SimpleNamespace(name="noop", arguments="{}"),
+            )
+            delta = types.SimpleNamespace(content=None, reasoning_content=None, tool_calls=[tc])
+            yield types.SimpleNamespace(choices=[types.SimpleNamespace(delta=delta)], usage=None)
+            yield types.SimpleNamespace(
+                choices=[],
+                usage=types.SimpleNamespace(
+                    prompt_tokens=800, completion_tokens=200, total_tokens=1000
+                ),
+            )
+
+        return gen()
+
+    def cost_per_token(self, model, prompt_tokens, completion_tokens):
+        return (0.01 * prompt_tokens, 0.01 * completion_tokens)  # $10 per 1k tokens here
+
+
+def test_run_stops_when_token_budget_exceeded(monkeypatch):
+    a = _agent_with_real_usage(max_tokens=1500)  # one 1000-tok call is fine, two isn't
+    monkeypatch.setitem(__import__("sys").modules, "litellm", _BudgetLiteLLM())
+    a.toolbox.call = lambda *a, **k: "ok"
+
+    async def run():
+        return [ev async for ev in a.run("go")]
+
+    events = asyncio.run(run())
+    assert any(ev.type == "error" and "token limit exceeded" in ev.text for ev in events)
+
+
+def test_run_stops_when_usd_budget_exceeded(monkeypatch):
+    a = _agent_with_real_usage(max_usd=0.01)  # first call already blows a 1-cent cap
+    monkeypatch.setitem(__import__("sys").modules, "litellm", _BudgetLiteLLM())
+    a.toolbox.call = lambda *a, **k: "ok"
+
+    async def run():
+        return [ev async for ev in a.run("go")]
+
+    events = asyncio.run(run())
+    assert any(ev.type == "error" and "budget exceeded" in ev.text for ev in events)
+
+
+def test_no_budget_means_unlimited():
+    from opendot.agent.config import AgentConfig as AC
+
+    c = AC(model="m", workdir="/tmp")
+    assert c.max_usd is None and c.max_tokens is None
