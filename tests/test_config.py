@@ -80,3 +80,40 @@ def test_agent_config_explicit_max_retries_overrides_env(monkeypatch):
     monkeypatch.setenv("OPENDOT_MAX_RETRIES", "999")
     cfg = AgentConfig(max_retries=1)
     assert cfg.max_retries == 1
+
+
+# --- budget caps (#123) ---
+
+from opendot.agent.config import _max_tokens, _max_usd  # noqa: E402
+
+
+def test_max_usd_unset_is_none(monkeypatch):
+    monkeypatch.delenv("OPENDOT_MAX_USD", raising=False)
+    assert _max_usd() is None
+
+
+def test_max_usd_from_env(monkeypatch):
+    monkeypatch.setenv("OPENDOT_MAX_USD", "2.50")
+    assert _max_usd() == 2.50
+
+
+def test_max_usd_invalid_or_nonpositive_is_none(monkeypatch):
+    for bad in ("abc", "0", "-1"):
+        monkeypatch.setenv("OPENDOT_MAX_USD", bad)
+        assert _max_usd() is None
+
+
+def test_max_tokens_unset_is_none(monkeypatch):
+    monkeypatch.delenv("OPENDOT_MAX_TOKENS", raising=False)
+    assert _max_tokens() is None
+
+
+def test_max_tokens_from_env(monkeypatch):
+    monkeypatch.setenv("OPENDOT_MAX_TOKENS", "50000")
+    assert _max_tokens() == 50000
+
+
+def test_max_tokens_invalid_or_nonpositive_is_none(monkeypatch):
+    for bad in ("abc", "0", "-5", "1.5"):
+        monkeypatch.setenv("OPENDOT_MAX_TOKENS", bad)
+        assert _max_tokens() is None

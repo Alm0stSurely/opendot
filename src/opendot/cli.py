@@ -679,14 +679,28 @@ def main() -> None:
 
     if oneshot:
         # Non-interactive: can't prompt, so decline irreversible commands by default.
-        agent = _build_agent(args.model, workdir, confirm=lambda _p: False, api_base=args.api_base, max_usd=args.usd, max_tokens=args.tokens)
+        agent = _build_agent(
+            args.model,
+            workdir,
+            confirm=lambda _p: False,
+            api_base=args.api_base,
+            max_usd=args.usd,
+            max_tokens=args.tokens,
+        )
         if args.command == "resume":
             agent.load_session()
             if not args.api_base:
                 _warn_if_missing_key(agent.config.model)
         asyncio.run(_run_turn(agent, oneshot))
     elif args.repl:
-        agent = _build_agent(args.model, workdir, confirm=_confirm, api_base=args.api_base, max_usd=args.usd, max_tokens=args.tokens)
+        agent = _build_agent(
+            args.model,
+            workdir,
+            confirm=_confirm,
+            api_base=args.api_base,
+            max_usd=args.usd,
+            max_tokens=args.tokens,
+        )
         if args.command == "resume":
             if agent.load_session():
                 console.print(
@@ -704,7 +718,14 @@ def main() -> None:
         # confirmed in-app. The placeholder here is replaced in OpendotTUI.__init__.
         from opendot.tui import run_tui
 
-        agent = _build_agent(args.model, workdir, confirm=lambda _p: False, api_base=args.api_base, max_usd=args.usd, max_tokens=args.tokens)
+        agent = _build_agent(
+            args.model,
+            workdir,
+            confirm=lambda _p: False,
+            api_base=args.api_base,
+            max_usd=args.usd,
+            max_tokens=args.tokens,
+        )
         if args.command == "resume":
             agent.load_session()
             # load_session may have changed the model; warn early like the other

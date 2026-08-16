@@ -171,7 +171,9 @@ def test_spurious_warning_for_local_api_base(monkeypatch):
     monkeypatch.setattr(sys, "stdin", FakeStdin())
 
     dummy_object = "dummy"
-    monkeypatch.setattr(cli, "_build_agent", lambda model, workdir, confirm, api_base: dummy_object)
+    monkeypatch.setattr(
+        cli, "_build_agent", lambda model, workdir, confirm, api_base, **kwargs: dummy_object
+    )
 
     monkeypatch.setattr(cli, "_interactive", lambda agent: None)
 
@@ -201,7 +203,9 @@ def test_warning_for_missing_key_with_no_api_base(monkeypatch):
     monkeypatch.setattr(sys, "stdin", FakeStdin())
 
     dummy_object = "dummy"
-    monkeypatch.setattr(cli, "_build_agent", lambda model, workdir, confirm, api_base: dummy_object)
+    monkeypatch.setattr(
+        cli, "_build_agent", lambda model, workdir, confirm, api_base, **kwargs: dummy_object
+    )
 
     monkeypatch.setattr(cli, "_interactive", lambda agent: None)
 

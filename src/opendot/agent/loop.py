@@ -392,10 +392,16 @@ class Agent:
 
         # Enforce spend/token budget set via --usd/--tokens or OPENDOT_MAX_USD/MAX_TOKENS.
         if self.config.max_usd is not None and self.usage.cost_usd > self.config.max_usd:
-            yield Event("error", text=f"budget exceeded: ${self.usage.cost_usd:.4f} > ${self.config.max_usd:.2f}")
+            yield Event(
+                "error",
+                text=f"budget exceeded: ${self.usage.cost_usd:.4f} > ${self.config.max_usd:.2f}",
+            )
             return
         if self.config.max_tokens is not None and self.usage.total_tokens > self.config.max_tokens:
-            yield Event("error", text=f"token limit exceeded: {self.usage.total_tokens} > {self.config.max_tokens}")
+            yield Event(
+                "error",
+                text=f"token limit exceeded: {self.usage.total_tokens} > {self.config.max_tokens}",
+            )
             return
 
         calls = [
@@ -422,10 +428,16 @@ class Agent:
 
         # Enforce spend/token budget.
         if self.config.max_usd is not None and self.usage.cost_usd > self.config.max_usd:
-            yield Event("error", text=f"budget exceeded: ${self.usage.cost_usd:.4f} > ${self.config.max_usd:.2f}")
+            yield Event(
+                "error",
+                text=f"budget exceeded: ${self.usage.cost_usd:.4f} > ${self.config.max_usd:.2f}",
+            )
             return
         if self.config.max_tokens is not None and self.usage.total_tokens > self.config.max_tokens:
-            yield Event("error", text=f"token limit exceeded: {self.usage.total_tokens} > {self.config.max_tokens}")
+            yield Event(
+                "error",
+                text=f"token limit exceeded: {self.usage.total_tokens} > {self.config.max_tokens}",
+            )
             return
 
         msg = resp.choices[0].message
