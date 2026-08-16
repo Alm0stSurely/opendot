@@ -159,8 +159,10 @@ _MAX_FILE_BYTES = 25 * 1024 * 1024  # 25 MB
 
 @dataclass
 class FileEntry:
-    """One captured file: content hash, POSIX mode bits, and (mtime, size) so a
-    later snapshot can skip re-hashing an unchanged file."""
+    """One captured file: content hash, POSIX mode bits, and (mtime, size,
+    ctime_ns) so a later snapshot can skip re-hashing an unchanged file. ctime_ns
+    is part of the change signature so a same-size rewrite within one mtime tick
+    is still detected."""
 
     h: str
     mode: int | None = None  # st_mode & 0o777, or None if unknown (old snapshots)

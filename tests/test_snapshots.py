@@ -748,7 +748,7 @@ def test_diff_to_engine_wrapper(tmp_path):
     assert delta["modified"][0]["path"] == "a.txt"
 
 
-def test_same_size_rewrite_inside_one_mtime_tick_is_captured(tmp_path, monkeypatch):
+def test_same_size_rewrite_inside_one_mtime_tick_is_captured(tmp_path):
     """Regression for issue #115: a same-size rewrite that lands inside one mtime
     tick must be captured with its new content, not reuse the old hash.
 
