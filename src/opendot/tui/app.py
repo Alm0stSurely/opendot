@@ -449,8 +449,8 @@ class OpendotTUI(App):
         a = self.agent
         if cmd == "help":
             self._write(
-                "commands: /log /diff <id> /undo [id] /redo /clear /save /resume /compact /model "
-                "/provider /mcp /composio /help",
+                "commands: /log /trace /diff <id> /undo [id] /redo /clear /save /resume "
+                "/compact /model /provider /mcp /composio /help",
                 "sys",
             )
         elif cmd == "clear":
@@ -492,6 +492,8 @@ class OpendotTUI(App):
                 self.run_worker(self._clear_log(), exclusive=False)
             else:
                 self.action_log()
+        elif cmd == "trace":
+            self._write("\n".join(self.agent.usage.trace_lines()), "sys")
         elif cmd == "diff":
             self._do_diff(rest.strip() or None)
         elif cmd == "undo":

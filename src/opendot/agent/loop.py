@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -340,6 +341,7 @@ class Agent:
         Raises _StreamUnsupported if the stream looks like a provider that emits
         tool calls as plain text (so the caller can fall back to non-streaming).
         """
+        started = time.monotonic()
         stream = await litellm.acompletion(
             model=self.config.model,
             messages=self.messages,
@@ -384,7 +386,9 @@ class Agent:
                     slot["args"] += tc.function.arguments
 
         if usage_chunk is not None:
-            self.usage.add_response(usage_chunk, litellm, model=self.config.model)
+            self.usage.add_response(
+                usage_chunk, litellm, model=self.config.model, latency_s=time.monotonic() - started
+            )
 
         calls = [
             {"id": c["id"] or f"call_{i}", "name": c["name"], "args": c["args"]}
@@ -395,6 +399,7 @@ class Agent:
 
     async def _nonstream_turn(self, litellm, tools):
         """Non-streaming fallback (reliable tool calls; no live tokens)."""
+        started = time.monotonic()
         resp = await litellm.acompletion(
             model=self.config.model,
             messages=self.messages,
@@ -403,7 +408,9 @@ class Agent:
             stream=False,
             api_base=self.config.api_base,  # None => provider default
         )
-        self.usage.add_response(resp, litellm, model=self.config.model)
+        self.usage.add_response(
+            resp, litellm, model=self.config.model, latency_s=time.monotonic() - started
+        )
         msg = resp.choices[0].message
         raw = getattr(msg, "tool_calls", None) or []
         calls = [

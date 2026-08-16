@@ -30,6 +30,7 @@ SLASH_HELP = """\
 [bold]Commands[/bold]
   /help     show this help
   /log      show the auditable history of actions taken
+  /trace    per-model-call cost and timing for this session
   /diff     preview what /undo <id> would change, without touching disk
   /undo     revert the last action ( /undo <id> to restore to a point )
   /redo     re-apply the action /undo just reverted
@@ -495,6 +496,10 @@ def _interactive(agent: Agent) -> None:
             continue
         if low == "/log":
             _cmd_log(agent.config.workdir)
+            continue
+        if low == "/trace":
+            for line in agent.usage.trace_lines():
+                console.print(f"[dim]{line}[/dim]")
             continue
         if low.startswith("/diff"):
             parts = text.split(maxsplit=1)
