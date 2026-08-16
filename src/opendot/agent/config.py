@@ -43,6 +43,36 @@ def _max_retries() -> int:
     return value if value >= 0 else 3
 
 
+def _max_usd() -> float | None:
+    """Default spend cap read from ``OPENDOT_MAX_USD``.
+
+    Falls back to None (unlimited) when the variable is unset or not a positive number.
+    """
+    raw = os.environ.get("OPENDOT_MAX_USD")
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+        return value if value > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _max_tokens() -> int | None:
+    """Default token cap read from ``OPENDOT_MAX_TOKENS``.
+
+    Falls back to None (unlimited) when the variable is unset or not a positive integer.
+    """
+    raw = os.environ.get("OPENDOT_MAX_TOKENS")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+        return value if value > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class AgentConfig:
     """Everything the agent loop needs. Kept minimal for v1."""
@@ -60,3 +90,9 @@ class AgentConfig:
     # Base URL for an OpenAI-compatible server (llama.cpp/llama-server, vLLM,
     # LM Studio, …). Falls back to $OPENAI_API_BASE / the provider default.
     api_base: str | None = None
+    # Per-agent spend cap in USD. None means unlimited (default). Set via
+    # OPENDOT_MAX_USD env var or the --usd CLI flag.
+    max_usd: float | None = field(default_factory=_max_usd)
+    # Per-agent token cap. None means unlimited (default). Set via
+    # OPENDOT_MAX_TOKENS env var or the --tokens CLI flag.
+    max_tokens: int | None = field(default_factory=_max_tokens)
